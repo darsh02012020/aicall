@@ -14,30 +14,33 @@ def universal_architect_optimizer(code):
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. DYNAMIC CONTEXT DISCOVERY ---
-    # List detection (data, list, transactions)
-    list_match = re.search(r'(?:List<.*?>|var)\s+(\w+)\s*=', code) or re.search(r'(\w+)\.(?:stream|parallelStream)', code)
-    list_name = list_match.group(1) if list_match else "data"
+    # --- 2. DYNAMIC CONTEXT DISCOVERY (CRITICAL FIX) ---
+    # Point 1 Fix: signature se list name uthana (e.g. List<Transaction> data -> 'data')
+    # Ye 'util' wala error hamesha ke liye khatam kar dega.
+    sig_match = re.search(r'\(List<.*?>\s+(\w+)\)', code)
+    list_name = sig_match.group(1) if sig_match else "data"
     
-    # Item detection
+    # Agar signature nahi mila toh code body se discovery
+    if not sig_match:
+        list_match = re.search(r'(?:List<.*?>|var)\s+(\w+)\s*=', code) or re.search(r'(\w+)\.(?:stream|parallelStream)', code)
+        list_name = list_match.group(1) if list_match else "data"
+    
+    # Item detection (dynamic forEach or Lambda)
     item_match = re.search(r'for\s*\(\w+\s+(\w+)\s*:', code) or re.search(r'(\w+)\s*->', code)
     item_name = item_match.group(1).strip() if item_match else "t"
 
     # --- 3. THE 3-POINT OPTIMIZATION ENGINE ---
-    
-    # Point 1 & 2: Detect slowness and precision risks
     is_n_squared = ".stream()" in code and (".filter(" in code or ".anyMatch(" in code)
     has_double = bool(re.search(r'double\s+\w+\s*=\s*0', code))
     
     if is_n_squared or "for(" in code:
-        tips.append(f"💎 <b>Architect Fix:</b> Upgraded O(n²) bottleneck to O(n) Frequency Mapping.")
+        tips.append(f"💎 <b>Architect Fix:</b> Upgraded O(n²) bottleneck to O(n) using Dynamic Frequency Map.")
         if has_double:
-            tips.append(f"⚖️ <b>Precision Fix:</b> Replaced <code>double</code> with <code>BigDecimal</code> for banking-grade accuracy.")
+            tips.append(f"⚖️ <b>Precision Fix:</b> Fixed Floating-point risk by using <code>BigDecimal</code>.")
 
-        # Logic for frequency map (Point 1 fix)
         freq_map_logic = f"Map<String, Long> counts = {list_name}.parallelStream().collect(Collectors.groupingBy(x -> x.id, Collectors.counting()));"
         
-        # Point 3: Benchmark included in the injected block
+        # Point 2 Fix: Added proper \\n for Java printf formatting
         optimized_block = f"""
         // --- Architect Grade: O(n) Optimized Engine ---
         long startTime = System.nanoTime();
@@ -53,15 +56,13 @@ def universal_architect_optimizer(code):
         System.out.println("Optimized Result: " + finalTotal);
         """
 
-        # CLEANUP: Purane double declaration aur loops ko delete karke naya block dalna
-        # Ye regex user ke inefficient code ko poora replace kar dega
+        # Dynamic replacement of inefficient structures
         code = re.sub(r'double\s+(\w+)\s*=\s*0;.*?System\.out\.println\(.*?\);', optimized_block, code, flags=re.DOTALL)
         code = re.sub(r'for\s*\(.*?\)\s*\{.*?System\.out\.println\(.*?\);?\s*\}', optimized_block, code, flags=re.DOTALL)
 
-    # --- 4. GENERIC HEALER (LongAdder & BigDecimal Sort) ---
+    # --- 4. GENERIC HEALER ---
     map_declarations = re.findall(r'(?:Map|ConcurrentMap)<.*?>\s+(\w+)\s*=', code)
     for m_name in map_declarations:
-        # Fix LongAdder Max logic (O(1) to O(n) collection sum)
         pattern = rf'{m_name}\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
         if re.search(pattern, code):
             code = re.sub(pattern, f'{m_name}.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
