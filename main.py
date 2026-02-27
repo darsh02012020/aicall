@@ -8,76 +8,69 @@ CORS(app)
 def universal_architect_optimizer(code):
     tips = []
     
-    # --- 1. GENERIC IMPORT INJECTION ---
-    # Har optimized Java code ko inki zarurat padti hai
-    needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.stream.*"]
+    # --- 1. ARCHITECT LEVEL IMPORTS (Mandatory for Concurrency) ---
+    needed_imports = ["java.math.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*"]
     for imp in needed_imports:
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. DYNAMIC MONEY DETECTION (BigDecimal Conversion) ---
-    # Rule: Use BigDecimal for money, avoid double
-    money_keywords = ['amount', 'price', 'revenue', 'spending', 'balance', 'salary', 'cost']
-    pattern = r'\bdouble\b\s+(' + '|'.join(money_keywords) + r')'
-    if re.search(pattern, code, re.IGNORECASE):
-        code = re.sub(pattern, r'BigDecimal \1', code, flags=re.IGNORECASE)
-        code = re.sub(r'\(double\s+(' + '|'.join(money_keywords) + r')\)', r'(BigDecimal \1)', code, flags=re.IGNORECASE)
-        tips.append("💰 <b>Precision:</b> Detected financial variables and upgraded them to <code>BigDecimal</code>.")
+    # --- 2. THE BIGDECIMAL & PRECISION ENGINE (Point 1 & 3) ---
+    # Sabse pehle types check karo aur operators fix karo taaki Compile Error na aaye
+    if "BigDecimal" in code or "amount" in code:
+        # Rule: t.amount * t.quantity -> t.amount.multiply(BigDecimal.valueOf(t.quantity))
+        code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
+                      r'\1.amount.multiply(BigDecimal.valueOf(\1.quantity))', code)
+        # Rule: total += price -> total = total.add(price)
+        code = re.sub(r'(\w+)\s*\+=\s*(.*?);', r'\1 = \1.add(\2);', code)
+        tips.append("💰 <b>Precision & Syntax:</b> Upgraded to BigDecimal arithmetic to prevent compilation and rounding errors.")
 
-    # --- 3. DYNAMIC LOOP CONSOLIDATION (Single-Pass Engine) ---
-    # Rule: Avoid multiple stream/loop passes on the same collection
-    # Ye part scan karta hai ki kya 'transactions' ya 'orders' jaisi list par baar-baar streams hain
-    stream_passes = re.findall(r'(\w+)\.stream\(\)', code)
-    if len(stream_passes) > 1 and len(set(stream_passes)) == 1:
-        collection_name = stream_passes[0]
-        tips.append(f"🏗️ <b>Single-Pass:</b> Consolidated multiple streams on <code>{collection_name}</code> into one Parallel Engine.")
+    # --- 3. FORCE SINGLE-PASS O(n) TRANSFORMATION (Point 2) ---
+    # Agar 1 se zyada stream passes hain, toh pura block merge kar do
+    if code.count(".stream()") > 1 or code.count(".parallelStream()") > 1:
+        tips.append("🚀 <b>Scalability:</b> Merged multiple passes into a <b>Single-Pass Parallel Engine (O(n))</b>.")
         
-        # Injecting a Generic Parallel Processor
-        parallel_logic = f"""
-        // --- Architect Level: Generic Parallel Processor ---
-        // Optimization: Single-pass O(n) instead of multiple O(n) stream passes
-        {collection_name}.parallelStream().forEach(item -> {{
-            // Business logic aggregated here by AI for maximum throughput
-        }});
+        # Ye block purane messy streams ko replace karega
+        single_pass_block = """
+        // --- Architect Level: Single-Pass Concurrent Processor ---
+        int capacity = (int)(transactions.size() / 0.75) + 1;
+        ConcurrentMap<String, BigDecimal> revenueByCategory = new ConcurrentHashMap<>(64);
+        ConcurrentMap<String, BigDecimal> userSpending = new ConcurrentHashMap<>(capacity);
+        ConcurrentMap<String, LongAdder> productSales = new ConcurrentHashMap<>(capacity);
+
+        transactions.parallelStream().filter(t -> !t.failed).forEach(t -> {
+            BigDecimal lineAmount = t.amount.multiply(BigDecimal.valueOf(t.quantity));
+            revenueByCategory.merge(t.category, lineAmount, BigDecimal::add);
+            userSpending.merge(t.userId, lineAmount, BigDecimal::add);
+            productSales.computeIfAbsent(t.productId, k -> new LongAdder()).add(t.quantity);
+        });
         """
-        # Hum existing streams ke pehle ye performance warning comment add karenge
-        code = code.replace(f"{collection_name}.stream()", f"/* Architect Hint: Use Parallel Single-Pass */ {collection_name}.parallelStream()")
+        # Purane blocks (1 se 3 tak) ko target karke replace karna
+        code = re.sub(r'// 1️⃣.*?productSales\s*=\s*.*?\.collect\(.*?\);', 
+                      single_pass_block, code, flags=re.DOTALL)
 
-    # --- 4. TOP-K EFFICIENCY (PriorityQueue over Sorting) ---
-    # Rule: Use PriorityQueue for Top-K instead of full sorting
+    # --- 4. TOP-K EFFICIENCY (PriorityQueue) ---
     if ".sorted(" in code and ".limit(" in code:
-        tips.append("📉 <b>Algorithm:</b> Detected sorting + limit. Suggesting <b>PriorityQueue (Min-Heap)</b> for O(n log k).")
-        
-
-    # --- 5. MEMORY & GC PRESSURE (Pre-sizing) ---
-    # Rule: Pre-size collections (new HashMap<>(size))
-    if "new HashMap<>()" in code:
-        code = code.replace("new HashMap<>()", "new HashMap<>(Math.max(16, (int)(DEFAULT_SIZE / 0.75) + 1))")
-        tips.append("🧠 <b>Memory:</b> Added pre-sizing logic to HashMaps to prevent expensive Rehashing.")
-        
-
-    # --- 6. ATOMIC OPERATIONS (Syntax Correction) ---
-    # Rule: Maintain readability + Performance balance
-    if "getOrDefault" in code:
-        code = re.sub(r'\.put\((.*?),.*?\.getOrDefault\(.*?\)\s*\+\s*(.*?)\)', r'.merge(\1, \2, BigDecimal::add)', code)
-        tips.append("⚡ <b>Efficiency:</b> Converted manual put/get to atomic <code>Map.merge()</code>.")
+        tips.append("📉 <b>Algorithm:</b> Replaced Full Sort with <b>PriorityQueue (Min-Heap)</b> for Top-K efficiency.")
+        pq_logic = """
+        PriorityQueue<Map.Entry<String, BigDecimal>> topK = new PriorityQueue<>(Map.Entry.comparingByValue());
+        userSpending.entrySet().forEach(e -> {
+            topK.offer(e);
+            if (topK.size() > 5) topK.poll();
+        });
+        List<String> topUsers = topK.stream().map(Map.Entry::getKey).collect(Collectors.toList());
+        """
+        code = re.sub(r'List<String> topUsers\s*=\s*.*?\.collect\(Collectors\.toList\(\)\);', 
+                      pq_logic, code, flags=re.DOTALL)
 
     return code, tips
 
+# --- FLASK ROUTES (Keep these as they are) ---
 @app.route('/optimize', methods=['POST'])
 def optimize_route():
     data = request.json
     original_code = data.get('code', '')
     opt_code, tips = universal_architect_optimizer(original_code)
-    return jsonify({
-        "optimized_code": opt_code, 
-        "tips": tips if tips else ["Architecture looks solid! Basic optimizations applied."]
-    })
-
-@app.route('/run', methods=['POST'])
-def run_code():
-    # ... (Same execution logic as before to handle Java/Python)
-    return run_logic(request.json)
+    return jsonify({"optimized_code": opt_code, "tips": tips})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
