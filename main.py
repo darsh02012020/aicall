@@ -8,36 +8,42 @@ app = Flask(__name__)
 CORS(app)
 
 @app.route('/run', methods=['POST'])
-def run_java():
+def run_code():
     data = request.json
     code = data.get('code', '')
     stdin_data = data.get('stdin', '')
-
-    # 1. Code mein se Class ka naam dhoondna (Regex use karke)
-    match = re.search(r'public\s+class\s+(\w+)', code)
-    if match:
-        class_name = match.group(1)
-    else:
-        # Agar public class nahi hai toh pehli class dhoondo
-        match_any = re.search(r'class\s+(\w+)', code)
-        class_name = match_any.group(1) if match_any else "HelloWorld"
-
-    file_name = f"{class_name}.java"
-    file_path = os.path.join("/tmp", file_name)
-
-    # 2. File ko save karna
-    with open(file_path, "w") as f:
-        f.write(code)
+    language = data.get('lang', 'java') # Frontend se language aayegi
 
     try:
-        # 3. Compile (javac)
-        compile_res = subprocess.run(['javac', '-d', '/tmp', file_path], capture_output=True, text=True)
-        if compile_res.returncode != 0:
-            return jsonify({"output": compile_res.stderr})
+        # --- PYTHON LOGIC ---
+        if language == 'python':
+            file_path = "/tmp/script.py"
+            with open(file_path, "w") as f:
+                f.write(code)
+            
+            run_res = subprocess.run(['python3', file_path], input=stdin_data, capture_output=True, text=True)
+            return jsonify({"output": run_res.stdout + run_res.stderr})
 
-        # 4. Run (java)
-        run_res = subprocess.run(['java', '-cp', '/tmp', class_name], input=stdin_data, capture_output=True, text=True)
-        return jsonify({"output": run_res.stdout + run_res.stderr})
+        # --- JAVA LOGIC ---
+        else:
+            match = re.search(r'public\s+class\s+(\w+)', code)
+            if not match:
+                match = re.search(r'class\s+(\w+)', code)
+            
+            class_name = match.group(1) if match else "HelloWorld"
+            file_path = f"/tmp/{class_name}.java"
+            
+            with open(file_path, "w") as f:
+                f.write(code)
+
+            # Compile
+            compile_res = subprocess.run(['javac', '-d', '/tmp', file_path], capture_output=True, text=True)
+            if compile_res.returncode != 0:
+                return jsonify({"output": "Compile Error:\n" + compile_res.stderr})
+
+            # Run
+            run_res = subprocess.run(['java', '-cp', '/tmp', class_name], input=stdin_data, capture_output=True, text=True)
+            return jsonify({"output": run_res.stdout + run_res.stderr})
 
     except Exception as e:
         return jsonify({"output": "System Error: " + str(e)})
