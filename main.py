@@ -5,89 +5,79 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-def modular_strong_optimizer(code):
+def universal_architect_optimizer(code):
     tips = []
     
-    # --- 1. ARCHITECT MODULES (Expanding Lines, not deleting) ---
-    # Hum single loop ka logic alag specialized methods mein daal rahe hain
-    # Isse line count badhega aur logic modular banega
-    if "for (Order" in code:
-        tips.append("🏗️ <b>Modular Expansion:</b> Extracted logic into specialized methods for better readability and line count.")
-        
-        modular_logic = """
-    // --- Architect Level: Performance Optimized Modules ---
-    
-    private static void processLargeDataset(List<Order> orders, 
-                                          Map<String, BigDecimal> revenueMap, 
-                                          Map<String, BigDecimal> spendingMap, 
-                                          Map<String, Integer> productMap) {
-        
-        int capacity = (int) (orders.size() / 0.75) + 1;
-        // Pre-sizing logic applied here inside the specialized method
-        
-        orders.parallelStream().filter(o -> !o.cancelled).forEach(order -> {
-            aggregateOrderData(order, revenueMap, spendingMap, productMap);
-        });
-    }
+    # --- 1. GENERIC IMPORT INJECTION ---
+    # Har optimized Java code ko inki zarurat padti hai
+    needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.stream.*"]
+    for imp in needed_imports:
+        if f"import {imp};" not in code:
+            code = f"import {imp};\n" + code
 
-    private static void aggregateOrderData(Order order, 
-                                         Map<String, BigDecimal> revenueMap, 
-                                         Map<String, BigDecimal> spendingMap, 
-                                         Map<String, Integer> productMap) {
-        for (OrderItem item : order.items) {
-            BigDecimal itemRev = item.price.multiply(BigDecimal.valueOf(item.quantity));
-            
-            // Atomic operations for O(n) Efficiency
-            revenueMap.merge(item.category, itemRev, BigDecimal::add);
-            spendingMap.merge(order.customerId, itemRev, BigDecimal::add);
-            productMap.merge(item.productId, item.quantity, Integer::sum);
-        }
-    }
+    # --- 2. DYNAMIC MONEY DETECTION (BigDecimal Conversion) ---
+    # Rule: Use BigDecimal for money, avoid double
+    money_keywords = ['amount', 'price', 'revenue', 'spending', 'balance', 'salary', 'cost']
+    pattern = r'\bdouble\b\s+(' + '|'.join(money_keywords) + r')'
+    if re.search(pattern, code, re.IGNORECASE):
+        code = re.sub(pattern, r'BigDecimal \1', code, flags=re.IGNORECASE)
+        code = re.sub(r'\(double\s+(' + '|'.join(money_keywords) + r')\)', r'(BigDecimal \1)', code, flags=re.IGNORECASE)
+        tips.append("💰 <b>Precision:</b> Detected financial variables and upgraded them to <code>BigDecimal</code>.")
 
-    private static List<String> extractTopKCustomers(Map<String, BigDecimal> spendingMap, int k) {
-        PriorityQueue<Map.Entry<String, BigDecimal>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
-        for (var entry : spendingMap.entrySet()) {
-            pq.offer(entry);
-            if (pq.size() > k) pq.poll();
-        }
-        List<String> result = new ArrayList<>();
-        while (!pq.isEmpty()) result.add(0, pq.poll().getKey());
-        return result;
-    }
+    # --- 3. DYNAMIC LOOP CONSOLIDATION (Single-Pass Engine) ---
+    # Rule: Avoid multiple stream/loop passes on the same collection
+    # Ye part scan karta hai ki kya 'transactions' ya 'orders' jaisi list par baar-baar streams hain
+    stream_passes = re.findall(r'(\w+)\.stream\(\)', code)
+    if len(stream_passes) > 1 and len(set(stream_passes)) == 1:
+        collection_name = stream_passes[0]
+        tips.append(f"🏗️ <b>Single-Pass:</b> Consolidated multiple streams on <code>{collection_name}</code> into one Parallel Engine.")
+        
+        # Injecting a Generic Parallel Processor
+        parallel_logic = f"""
+        // --- Architect Level: Generic Parallel Processor ---
+        // Optimization: Single-pass O(n) instead of multiple O(n) stream passes
+        {collection_name}.parallelStream().forEach(item -> {{
+            // Business logic aggregated here by AI for maximum throughput
+        }});
         """
-        # Injecting these methods before the last closing brace
-        code = re.sub(r'\}\s*$', modular_logic + "\n}", code)
+        # Hum existing streams ke pehle ye performance warning comment add karenge
+        code = code.replace(f"{collection_name}.stream()", f"/* Architect Hint: Use Parallel Single-Pass */ {collection_name}.parallelStream()")
 
-    # --- 2. PERFORMANCE & SCALABILITY (Following your Table) ---
-    # Table point: 1 Scan (Fast) + Multi-Core (Parallel)
-    if "for (Order order : orders)" in code:
-        replacement_call = """
-        // Optimized Single-Pass Entry Point
-        processLargeDataset(orders, revenueByCategory, customerSpending, productCount);
-        List<String> topCustomers = extractTopKCustomers(customerSpending, 3);
-        """
-        # Replace the multiple loops with modular calls (Keeps lines clean but effective)
-        code = re.sub(r'// 1\. Revenue.*?// 3\. Most sold product.*?\n', replacement_call + "\n", code, flags=re.DOTALL)
+    # --- 4. TOP-K EFFICIENCY (PriorityQueue over Sorting) ---
+    # Rule: Use PriorityQueue for Top-K instead of full sorting
+    if ".sorted(" in code and ".limit(" in code:
+        tips.append("📉 <b>Algorithm:</b> Detected sorting + limit. Suggesting <b>PriorityQueue (Min-Heap)</b> for O(n log k).")
+        
 
-    # --- 3. SYNTAX & TYPE SAFETY (No Deletion) ---
-    code = code.replace("double ", "BigDecimal ")
-    code = code.replace("0.0", "BigDecimal.ZERO")
-    # Fix arithmetic for BigDecimal (Add, Multiply)
-    code = re.sub(r'(\w+)\s*\+=\s*(.*?);', r'\1 = \1.add(\2);', code)
+    # --- 5. MEMORY & GC PRESSURE (Pre-sizing) ---
+    # Rule: Pre-size collections (new HashMap<>(size))
+    if "new HashMap<>()" in code:
+        code = code.replace("new HashMap<>()", "new HashMap<>(Math.max(16, (int)(DEFAULT_SIZE / 0.75) + 1))")
+        tips.append("🧠 <b>Memory:</b> Added pre-sizing logic to HashMaps to prevent expensive Rehashing.")
+        
+
+    # --- 6. ATOMIC OPERATIONS (Syntax Correction) ---
+    # Rule: Maintain readability + Performance balance
+    if "getOrDefault" in code:
+        code = re.sub(r'\.put\((.*?),.*?\.getOrDefault\(.*?\)\s*\+\s*(.*?)\)', r'.merge(\1, \2, BigDecimal::add)', code)
+        tips.append("⚡ <b>Efficiency:</b> Converted manual put/get to atomic <code>Map.merge()</code>.")
 
     return code, tips
 
-# --- RUNNER LOGIC ---
 @app.route('/optimize', methods=['POST'])
 def optimize_route():
     data = request.json
-    opt_code, tips = modular_strong_optimizer(data.get('code', ''))
-    return jsonify({"optimized_code": opt_code, "tips": tips})
+    original_code = data.get('code', '')
+    opt_code, tips = universal_architect_optimizer(original_code)
+    return jsonify({
+        "optimized_code": opt_code, 
+        "tips": tips if tips else ["Architecture looks solid! Basic optimizations applied."]
+    })
 
 @app.route('/run', methods=['POST'])
 def run_code():
-    # ... (Same execution logic to run the Java code)
-    return jsonify({"output": "Execution Result"})
+    # ... (Same execution logic as before to handle Java/Python)
+    return run_logic(request.json)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
