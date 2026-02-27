@@ -8,97 +8,65 @@ CORS(app)
 def universal_architect_optimizer(code):
     tips = []
     
-    # 1. ARCHITECT IMPORTS
+    # --- 1. ARCHITECT LEVEL IMPORTS ---
     needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*", "java.util.stream.*"]
     for imp in needed_imports:
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # 2. DYNAMIC VARIABLE DISCOVERY
-    list_match = re.search(r'List<.*?>\s+(\w+)\s*=', code)
-    list_name = list_match.group(1) if list_match else "transactions"
-    item_name = "t" # Standardizing for the lambda
-
-    # 3. SCHEMA DISCOVERY (Field Detection)
-    fields = re.findall(r'(\w+)\s+(\w+);', code)
-    numeric_fields = [f[1] for f in fields if f[0].lower() in ['double', 'int', 'long', 'float']]
-    id_fields = [f[1] for f in fields if f[0] == 'String']
-    bool_fields = [f[1] for f in fields if f[0].lower() == 'boolean']
-
-    amt_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["amt", "price", "val", "amount"])), numeric_fields[0] if numeric_fields else "amount")
-    qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity"]) and f != amt_f), "1")
-    fail_f = next((f for f in bool_fields if any(x in f.lower() for x in ["fail", "error", "valid"])), None)
-
-    # 4. CRITICAL FIX: DUPLICATE CLEANER & SYNTAX REPAIR
-    # Purane slow blocks aur syntax errors (like extra parenthesis) ko saaf karna
-    code = re.sub(rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);', '', code, flags=re.DOTALL)
-    # Fix extra parenthesis error in .max() calls if present in source
-    code = re.sub(r'\.max\(.*?\)\)\)', '.max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
-
-    # 5. DYNAMIC ENGINE & COLLISION REPAIR
-    used_maps = set(re.findall(r'(\w+)\.entrySet\(\)', code) + re.findall(r'System\.out\.println\((\w+)\)', code))
-    init_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
-    merge_logics = []
-
-    for m_name in used_maps:
-        # FIX 1: Variable Collision (Map vs String/List)
-        # Agar niche String/List ka same naam hai, toh Map ko 'Map' suffix do
-        is_clash = re.search(rf'(?:String|List<.*?>)\s+{m_name}\s*=', code)
-        actual_m_name = f"{m_name}Map" if is_clash else m_name
-        
-        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total", "sold"])
-        final_v_type = "LongAdder" if is_counter else "BigDecimal"
-        
-        # FIX 2: Logical Key Selection (Product ID for Sales, User ID for Spending)
-        if is_counter:
-            best_key = next((f for f in id_fields if "product" in f.lower() or "item" in f.lower()), id_fields[0])
-        else:
-            best_key = next((f for f in id_fields if "user" in f.lower() or "id" in f.lower()), id_fields[0])
-
-        # Sync code references in the rest of the file
-        if actual_m_name != m_name:
-            code = code.replace(f"{m_name}.entrySet()", f"{actual_m_name}.entrySet()")
-            code = code.replace(f"System.out.println({m_name})", f"System.out.println({actual_m_name})")
-
-        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {actual_m_name} = new ConcurrentHashMap<>({ '64' if 'cat' in best_key.lower() else 'capacity' });"
-        
-        # FIX 3: Type Safety for Sorting/Max
-        if final_v_type == "BigDecimal":
-            # Double.compare hatao, BigDecimal safe logic lagao
-            code = re.sub(rf'\.sorted\(.*?Double\.compare.*?\)', 
-                          f'.sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())', code)
-            merge_logics.append(f"{actual_m_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
-        else:
-            # LongAdder max logic
-            code = re.sub(rf'\.max\(.*?\)', 
-                          f'.max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
-            merge_logics.append(f"{actual_m_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
-
-    # 6. ENGINE INJECTION (Optimized Loop)
-    filter_logic = f"if ({item_name} == null" + (f" || {item_name}.{fail_f}" if fail_f else "") + ") return;"
+    # --- 2. DYNAMIC CONTEXT DISCOVERY ---
+    # List aur Item detect karna (e.g., transactions, t)
+    list_match = re.search(r'(\w+)\.(?:parallelStream|stream)\(\)', code)
+    list_name = list_match.group(1) if list_match else "list"
     
-    optimized_block = f"""
-        // --- Architect Level: Dynamic Unified Engine (O(n)) ---
-        long startTime = System.nanoTime();
-        LongAdder errors = new LongAdder(); {init_logic}
+    item_match = re.search(r'\(([^)]+)\)\s*->', code) or re.search(r'(\w+)\s*->', code)
+    item_name = item_match.group(1).strip() if item_match else "t"
 
+    # Maps Detection: Hum dhundte hain ki user ne kaunse Maps declare kiye hain
+    # Pattern: Map name aur uska purpose (revenue, sales, spending)
+    map_declarations = re.findall(r'(?:Map|ConcurrentMap)<.*?>\s+(\w+)\s*=', code)
+    
+    # --- 3. DYNAMIC TRANSFORMATION ENGINE ---
+    if ".stream()" in code and map_declarations:
+        tips.append(f"🚀 <b>Architect Flow:</b> Performed Context-Aware O(n) Optimization on <code>{list_name}</code>.")
+        
+        # Build the dynamic forEach block based ONLY on existing maps
+        merge_logics = []
+        
+        # Har map ke liye sahi merge logic generate karna
+        for m_name in map_declarations:
+            if "rev" in m_name.lower() or "sum" in m_name.lower() or "total" in m_name.lower():
+                merge_logics.append(f"{m_name}.merge({item_name}.getCategory(), val, BigDecimal::add);")
+            elif "spend" in m_name.lower() or "user" in m_name.lower():
+                merge_logics.append(f"{m_name}.merge({item_name}.getUserId(), val, BigDecimal::add);")
+            elif "sales" in m_name.lower() or "count" in m_name.lower() or "prod" in m_name.lower():
+                merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.getProductId(), k -> new LongAdder()).add({item_name}.getQuantity());")
+
+        # Reconstruct calculation logic
+        is_bd = "BigDecimal" in code
+        calc = f"{item_name}.getAmount()" if is_bd else f"BigDecimal.valueOf({item_name}.getAmount())"
+        
+        # Create the optimized block
+        optimized_block = f"""
+        // --- Optimized Single-Pass Engine ---
         {list_name}.parallelStream().forEach({item_name} -> {{
-            try {{
-                {filter_logic}
-                BigDecimal val = BigDecimal.valueOf({item_name}.{amt_f}).multiply(BigDecimal.valueOf({item_name}.{qty_f}));
-                {" ".join(merge_logics)}
-            }} catch (Exception e) {{
-                errors.increment();
-            }}
+            BigDecimal val = {calc}.multiply(BigDecimal.valueOf({item_name}.getQuantity()));
+            {" ".join(merge_logics)}
         }});
-        System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
-    """
+        """
+        
+        # Replace only the stream/loop part, keeping user's map declarations intact
+        code = re.sub(r'// 1️⃣.*?\.collect\(.*?\);', optimized_block, code, flags=re.DOTALL)
 
-    # Replace the parallelStream block if user already tried to write one, or inject after DataGenerator
-    code = re.sub(rf'{list_name}\.parallelStream\(\).*?\}\);', '', code, flags=re.DOTALL)
-    code = re.sub(rf'({list_name}\s*=\s*.*?DataGenerator.*?;)', r'\1\n' + optimized_block, code, flags=re.DOTALL)
-    
-    tips.append("💎 <b>Production-Ready:</b> All variable collisions, type mismatches, and syntax errors auto-fixed.")
+    # --- 4. GENERIC LONGADDER HEALER (No Hardcoding) ---
+    # Kisi bhi variable par agar max() error hai, toh use theek karo
+    for m_name in map_declarations:
+        pattern = rf'{m_name}\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
+        if re.search(pattern, code):
+            code = re.sub(pattern, 
+                          f'{m_name}.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
+            tips.append(f"🛠️ <b>Healed:</b> Fixed <code>LongAdder</code> comparison for <code>{m_name}</code>.")
+
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
@@ -108,6 +76,4 @@ def optimize_route():
     return jsonify({"optimized_code": opt_code, "tips": tips})
 
 if __name__ == '__main__':
-    # Render ya kisi bhi platform ka port auto-pick karega
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=10000)
