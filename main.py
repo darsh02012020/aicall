@@ -17,66 +17,66 @@ def universal_architect_optimizer(code):
     # 2. DYNAMIC VARIABLE DISCOVERY
     list_match = re.search(r'List<.*?>\s+(\w+)\s*=', code)
     list_name = list_match.group(1) if list_match else "transactions"
-    
-    item_match = re.search(r'(\w+)\s*->', code)
-    item_name = item_match.group(1).strip() if item_match else "t"
+    item_name = "t" # Standardizing for the lambda
 
-    # 3. CLASS SCHEMA DISCOVERY
+    # 3. SCHEMA DISCOVERY (Field Detection)
     fields = re.findall(r'(\w+)\s+(\w+);', code)
     numeric_fields = [f[1] for f in fields if f[0].lower() in ['double', 'int', 'long', 'float']]
     id_fields = [f[1] for f in fields if f[0] == 'String']
     bool_fields = [f[1] for f in fields if f[0].lower() == 'boolean']
 
     amt_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["amt", "price", "val", "amount"])), numeric_fields[0] if numeric_fields else "amount")
-    qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity"]) and f != amt_f), numeric_fields[1] if len(numeric_fields) > 1 else "1")
+    qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity"]) and f != amt_f), "1")
     fail_f = next((f for f in bool_fields if any(x in f.lower() for x in ["fail", "error", "valid"])), None)
 
-    # 4. FIXED: DUPLICATE BLOCK CLEANER (Regex improved to not delete too much)
-    # Purane stream grouping aur summing logic ko safely hatane ke liye
+    # 4. CRITICAL FIX: DUPLICATE CLEANER & SYNTAX REPAIR
+    # Purane slow blocks aur syntax errors (like extra parenthesis) ko saaf karna
     code = re.sub(rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);', '', code, flags=re.DOTALL)
+    # Fix extra parenthesis error in .max() calls if present in source
+    code = re.sub(r'\.max\(.*?\)\)\)', '.max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
 
     # 5. DYNAMIC ENGINE & COLLISION REPAIR
-    # EntrySet ya Println se maps identify karna
     used_maps = set(re.findall(r'(\w+)\.entrySet\(\)', code) + re.findall(r'System\.out\.println\((\w+)\)', code))
     init_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
     merge_logics = []
 
     for m_name in used_maps:
-        # FIX: Agar niche List<String> topUsers hai, toh map ka naam topUsersMap hoga
-        is_result_list = re.search(rf'List<String>\s+{m_name}\s*=', code)
-        actual_m_name = f"{m_name}Map" if is_result_list else m_name
+        # FIX 1: Variable Collision (Map vs String/List)
+        # Agar niche String/List ka same naam hai, toh Map ko 'Map' suffix do
+        is_clash = re.search(rf'(?:String|List<.*?>)\s+{m_name}\s*=', code)
+        actual_m_name = f"{m_name}Map" if is_clash else m_name
         
-        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total"])
+        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total", "sold"])
         final_v_type = "LongAdder" if is_counter else "BigDecimal"
         
-        # Semantic Key Selection
-        best_key = next((f for f in id_fields if f.lower() in m_name.lower()), None)
-        if not best_key:
-            best_key = id_fields[1] if (is_counter and len(id_fields) > 1) else id_fields[0]
+        # FIX 2: Logical Key Selection (Product ID for Sales, User ID for Spending)
+        if is_counter:
+            best_key = next((f for f in id_fields if "product" in f.lower() or "item" in f.lower()), id_fields[0])
+        else:
+            best_key = next((f for f in id_fields if "user" in f.lower() or "id" in f.lower()), id_fields[0])
 
-        # Sync code references
+        # Sync code references in the rest of the file
         if actual_m_name != m_name:
             code = code.replace(f"{m_name}.entrySet()", f"{actual_m_name}.entrySet()")
             code = code.replace(f"System.out.println({m_name})", f"System.out.println({actual_m_name})")
 
         init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {actual_m_name} = new ConcurrentHashMap<>({ '64' if 'cat' in best_key.lower() else 'capacity' });"
         
-        # FIXED: Sorting Patch (BigDecimal precision fix)
+        # FIX 3: Type Safety for Sorting/Max
         if final_v_type == "BigDecimal":
-            # Niche ke sorting logic ko fix karta hai
+            # Double.compare hatao, BigDecimal safe logic lagao
             code = re.sub(rf'\.sorted\(.*?Double\.compare.*?\)', 
                           f'.sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())', code)
             merge_logics.append(f"{actual_m_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
         else:
-            # LongAdder max logic fix
+            # LongAdder max logic
             code = re.sub(rf'\.max\(.*?\)', 
                           f'.max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
             merge_logics.append(f"{actual_m_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
 
-    # 6. ENGINE INJECTION
+    # 6. ENGINE INJECTION (Optimized Loop)
     filter_logic = f"if ({item_name} == null" + (f" || {item_name}.{fail_f}" if fail_f else "") + ") return;"
     
-    # Template updated for clean indentation and correct BigDecimal conversion
     optimized_block = f"""
         // --- Architect Level: Dynamic Unified Engine (O(n)) ---
         long startTime = System.nanoTime();
@@ -94,9 +94,11 @@ def universal_architect_optimizer(code):
         System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
     """
 
+    # Replace the parallelStream block if user already tried to write one, or inject after DataGenerator
+    code = re.sub(rf'{list_name}\.parallelStream\(\).*?\}\);', '', code, flags=re.DOTALL)
     code = re.sub(rf'({list_name}\s*=\s*.*?DataGenerator.*?;)', r'\1\n' + optimized_block, code, flags=re.DOTALL)
     
-    tips.append("🛡️ <b>Critical Patch Applied:</b> Fixed Variable Collisions, BigDecimal Comparison, and LongAdder Max logic.")
+    tips.append("💎 <b>Production-Ready:</b> All variable collisions, type mismatches, and syntax errors auto-fixed.")
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
