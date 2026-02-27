@@ -14,73 +14,83 @@ def universal_architect_optimizer(code):
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # 2. DYNAMIC DISCOVERY (No Hardcoded Names)
-    # List name aur Item name dhoondna
+    # 2. DYNAMIC DISCOVERY (Variable Names)
     list_match = re.search(r'(\w+)\.(?:parallelStream|stream)\(\)', code)
     list_name = list_match.group(1) if list_match else "dataList"
     
     item_match = re.search(r'(\w+)\s*->', code)
     item_name = item_match.group(1).strip() if item_match else "obj"
 
-    # User ne jo Maps pehle se banaye hain unhe detect karna
-    # Pattern: Map name aur uska Generic Type (BigDecimal ya LongAdder/Integer)
-    map_info = re.findall(r'(?:Map|ConcurrentMap)<.*?,?\s*(\w+)>\s+(\w+)\s*=', code)
-    # map_info format: [('BigDecimal', 'myMap'), ('LongAdder', 'counterMap')]
+    # Map information extraction (Value Types and Names)
+    # Pattern detects: Map<Key, Value> name = ...
+    map_info = re.findall(r'(?:Map|ConcurrentMap)<\s*\w+\s*,\s*(\w+)\s*>\s+(\w+)\s*=', code)
 
-    # 3. DYNAMIC CAPACITY CALCULATION (No Hardcoded Numbers)
-    if f"{list_name}.size()" in code and "capacity" not in code.lower():
-        capacity_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
-        # Insert capacity before the first Map declaration
-        code = re.sub(r'(?:Map|ConcurrentMap)<.*?>\s+\w+\s*=', capacity_logic + r'\n        \0', code, count=1)
-        tips.append("🧠 <b>Dynamic Memory:</b> Calculated Map capacity based on input list size.")
+    # 3. CLASS FIELD DISCOVERY (Ab kuch bhi static nahi)
+    # Hum dhoond rahe hain ki Transaction/Object class mein kaunsi fields hain
+    fields = re.findall(r'\b(?:String|double|int|long|BigDecimal)\b\s+(\w+);', code)
+    
+    # Identify "Quantity" and "Amount" style fields dynamically
+    qty_field = next((f for f in fields if any(x in f.lower() for x in ["qty", "quantity", "count", "unit"])), "quantity")
+    amt_field = next((f for f in fields if any(x in f.lower() for x in ["amt", "amount", "price", "value"])), "amount")
+    key_field = next((f for f in fields if any(x in f.lower() for x in ["id", "key", "name", "category"])), "id")
 
-    # 4. UNIVERSAL TRANSFORMATION ENGINE
-    if map_info and (".stream()" in code or ".parallelStream()" in code):
-        tips.append(f"🚀 <b>Architect Flow:</b> Performed Context-Aware O(n) Optimization on <code>{list_name}</code>.")
-        
-        merge_logics = []
-        for v_type, m_name in map_info:
-            # Logic identify karna type ke basis par (Not Name!)
-            if "BigDecimal" in v_type:
-                # Automatic field detection (amount/value/price)
-                val_field = "amount" if "amount" in code else "value" 
-                merge_logics.append(f"{m_name}.merge({item_name}.getCategory(), val, BigDecimal::add);")
-            elif any(x in v_type for x in ["LongAdder", "Integer", "Long"]):
-                merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.getId(), k -> new LongAdder()).add({item_name}.getQuantity());")
+    # 4. GLOBAL CLEANER
+    redundant_pattern = rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);'
+    if len(re.findall(redundant_pattern, code, flags=re.DOTALL)) > 0:
+        code = re.sub(redundant_pattern, '', code, flags=re.DOTALL)
+        tips.append("🧹 <b>Cleaner:</b> Dynamically flushed all redundant stream scans.")
 
-        # Dynamic Calculation Logic
-        is_bd = "BigDecimal" in code
-        calc_source = "amount" if "amount" in code else "value"
-        calc = f"{item_name}.{calc_source}" if is_bd else f"BigDecimal.valueOf({item_name}.{calc_source})"
-        
-        optimized_block = f"""
-        // --- Architect Level: Unified Single-Pass Engine (Universal) ---
+    # 5. DYNAMIC INITIALIZATION
+    init_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
+    for v_type, m_name in map_info:
+        # Long/Integer ko LongAdder mein badalna (Concurrency ke liye)
+        final_type = "LongAdder" if any(x in v_type for x in ["Integer", "Long", "Int"]) else "BigDecimal"
+        init_logic += f"\n        ConcurrentMap<String, {final_type}> {m_name} = new ConcurrentHashMap<>(capacity);"
+    
+    code = re.sub(rf'({list_name}\.(?:parallelStream|stream))', init_logic + r"\n\n        \1", code, count=1)
+
+    # 6. ZERO-STATIC MERGE ENGINE
+    merge_logics = []
+    for v_type, m_name in map_info:
+        if any(x in v_type for x in ["Double", "BigDecimal", "Float"]):
+            # Use discovered fields
+            merge_logics.append(f"{m_name}.merge({item_name}.{key_field}, val, BigDecimal::add);")
+        else:
+            merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.{key_field}, k -> new LongAdder()).add({item_name}.{qty_field});")
+
+    optimized_block = f"""
+        // --- Architect Level: Dynamic Unified Engine ---
         long startTime = System.nanoTime();
         LongAdder errorCount = new LongAdder();
 
         {list_name}.parallelStream().forEach({item_name} -> {{
             try {{
                 if ({item_name} == null) return;
-                BigDecimal val = {calc}.multiply(BigDecimal.valueOf({item_name}.quantity));
+                BigDecimal val = BigDecimal.valueOf({item_name}.{amt_field}).multiply(BigDecimal.valueOf({item_name}.{qty_field}));
                 {" ".join(merge_logics)}
             }} catch (Exception e) {{
                 errorCount.increment();
             }}
         }});
         long endTime = System.nanoTime();
-        System.out.printf("Processed in: %.2f ms | Errors: %d%n", (endTime - startTime) / 1e6, errorCount.sum());
-        """
-        
-        # Redundant logic ko replace karna bina code delete kiye
-        code = re.sub(r'//\s*---\s*Optimized.*?\}\);', optimized_block, code, flags=re.DOTALL)
+        System.out.printf("Execution: %.2f ms | Faults: %d%n", (endTime - startTime) / 1e6, errorCount.sum());
+    """
+    
+    # Final replacement
+    code = re.sub(rf'{list_name}\.(?:parallelStream|stream).*?\.forEach\(.*?\);|// 1️⃣.*?\n.*?(?={list_name})', optimized_block, code, flags=re.DOTALL, count=1)
 
-    # 5. GENERIC LONGADDER HEALER (Type Based)
-    for v_type, m_name in map_info:
-        if "LongAdder" in v_type:
-            pattern = rf'{m_name}\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
-            if re.search(pattern, code):
-                code = re.sub(pattern, f'{m_name}.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
-                tips.append(f"🛠️ <b>Healed:</b> Fixed <code>LongAdder</code> comparison for <code>{m_name}</code>.")
+    # 7. DYNAMIC TOP-K HEALER
+    if "top" in code.lower() or "limit" in code:
+        # Dhoondte hain konsa map sort ho raha hai
+        sort_map_match = re.search(r'(\w+)\.entrySet\(\)\.stream\(\)\.sorted', code)
+        sort_map = sort_map_match.group(1) if sort_map_match else (map_info[0][1] if map_info else "results")
+        
+        pq_logic = f"""
+        List<String> topResults = {sort_map}.entrySet().stream()
+                .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
+                .limit(5).map(Map.Entry::getKey).collect(Collectors.toList());
+        """
+        code = re.sub(r'List<.*?>\s+\w+\s*=\s*.*?\.sorted\(.*?\)\.limit\(.*?\).*?\.collect\(.*?\);', pq_logic, code, flags=re.DOTALL)
 
     return code, tips
 
