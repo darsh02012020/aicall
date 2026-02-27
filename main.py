@@ -8,63 +8,64 @@ CORS(app)
 def universal_architect_optimizer(code):
     tips = []
     
-    # --- 1. ARCHITECT LEVEL IMPORTS (Mandatory for Concurrency) ---
-    needed_imports = ["java.math.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*"]
+    # --- 1. ARCHITECT LEVEL IMPORTS ---
+    needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*", "java.util.stream.*"]
     for imp in needed_imports:
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. THE BIGDECIMAL & PRECISION ENGINE (Point 1 & 3) ---
-    # Sabse pehle types check karo aur operators fix karo taaki Compile Error na aaye
-    if "BigDecimal" in code or "amount" in code:
-        # Rule: t.amount * t.quantity -> t.amount.multiply(BigDecimal.valueOf(t.quantity))
-        code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
-                      r'\1.amount.multiply(BigDecimal.valueOf(\1.quantity))', code)
-        # Rule: total += price -> total = total.add(price)
-        code = re.sub(r'(\w+)\s*\+=\s*(.*?);', r'\1 = \1.add(\2);', code)
-        tips.append("💰 <b>Precision & Syntax:</b> Upgraded to BigDecimal arithmetic to prevent compilation and rounding errors.")
+    # --- 2. FIX: TYPE MISMATCH & PRECISION (Point 1 & 3) ---
+    # Rule: Convert double fields to BigDecimal for financial safety
+    if "double amount" in code:
+        code = code.replace("double amount", "BigDecimal amount")
+        tips.append("💰 <b>Type Fix:</b> Upgraded <code>double</code> to <code>BigDecimal</code> for financial precision.")
+    
+    # Fix arithmetic syntax: t.amount * t.quantity -> BigDecimal safe multiply
+    # We use BigDecimal.valueOf() as a safety bridge for any numeric type
+    code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
+                  r'BigDecimal.valueOf(\1.amount).multiply(BigDecimal.valueOf(\1.quantity))', code)
+    
+    # Fix standard multiply call if it's missing valueOf bridge
+    code = re.sub(r'(\w+)\.amount\.multiply', r'BigDecimal.valueOf(\1.amount).multiply', code)
 
-    # --- 3. FORCE SINGLE-PASS O(n) TRANSFORMATION (Point 2) ---
-    # Agar 1 se zyada stream passes hain, toh pura block merge kar do
-    if code.count(".stream()") > 1 or code.count(".parallelStream()") > 1:
-        tips.append("🚀 <b>Scalability:</b> Merged multiple passes into a <b>Single-Pass Parallel Engine (O(n))</b>.")
+    # --- 3. FORCE SINGLE-PASS O(n) & GUARANTEED VARIABLES (Point 2) ---
+    if code.count(".stream()") > 1 or "transactions" in code:
+        tips.append("🚀 <b>Architect Flow:</b> Implementing Single-Pass O(n) with thread-safe aggregation.")
         
-        # Ye block purane messy streams ko replace karega
-        single_pass_block = """
-        // --- Architect Level: Single-Pass Concurrent Processor ---
+        unified_engine = """
+        // --- Architect Level: Unified Single-Pass Engine ---
         int capacity = (int)(transactions.size() / 0.75) + 1;
         ConcurrentMap<String, BigDecimal> revenueByCategory = new ConcurrentHashMap<>(64);
         ConcurrentMap<String, BigDecimal> userSpending = new ConcurrentHashMap<>(capacity);
         ConcurrentMap<String, LongAdder> productSales = new ConcurrentHashMap<>(capacity);
 
         transactions.parallelStream().filter(t -> !t.failed).forEach(t -> {
-            BigDecimal lineAmount = t.amount.multiply(BigDecimal.valueOf(t.quantity));
-            revenueByCategory.merge(t.category, lineAmount, BigDecimal::add);
-            userSpending.merge(t.userId, lineAmount, BigDecimal::add);
+            BigDecimal val = BigDecimal.valueOf(t.amount).multiply(BigDecimal.valueOf(t.quantity));
+            revenueByCategory.merge(t.category, val, BigDecimal::add);
+            userSpending.merge(t.userId, val, BigDecimal::add);
             productSales.computeIfAbsent(t.productId, k -> new LongAdder()).add(t.quantity);
         });
-        """
-        # Purane blocks (1 se 3 tak) ko target karke replace karna
-        code = re.sub(r'// 1️⃣.*?productSales\s*=\s*.*?\.collect\(.*?\);', 
-                      single_pass_block, code, flags=re.DOTALL)
 
-    # --- 4. TOP-K EFFICIENCY (PriorityQueue) ---
-    if ".sorted(" in code and ".limit(" in code:
-        tips.append("📉 <b>Algorithm:</b> Replaced Full Sort with <b>PriorityQueue (Min-Heap)</b> for Top-K efficiency.")
-        pq_logic = """
-        PriorityQueue<Map.Entry<String, BigDecimal>> topK = new PriorityQueue<>(Map.Entry.comparingByValue());
+        // Guaranteed Top-K Discovery (Prevents Missing Variable Error)
+        PriorityQueue<Map.Entry<String, BigDecimal>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
         userSpending.entrySet().forEach(e -> {
-            topK.offer(e);
-            if (topK.size() > 5) topK.poll();
+            pq.offer(e);
+            if (pq.size() > 5) pq.poll();
         });
-        List<String> topUsers = topK.stream().map(Map.Entry::getKey).collect(Collectors.toList());
+        List<String> topUsers = pq.stream().map(Map.Entry::getKey).collect(Collectors.toList());
         """
-        code = re.sub(r'List<String> topUsers\s*=\s*.*?\.collect\(Collectors\.toList\(\)\);', 
-                      pq_logic, code, flags=re.DOTALL)
+        # Replacing the multi-stream/loop mess with the unified engine
+        code = re.sub(r'// 1️⃣.*?productSales\s*=\s*.*?\.collect\(.*?\);', unified_engine, code, flags=re.DOTALL)
+
+    # --- 4. FIX: LONGADDER COMPARISON (Point 3) ---
+    if "productSales" in code:
+        # LongAdder doesn't implement Comparable, must use .sum() or .longValue()
+        code = re.sub(r'Map\.Entry\.comparingByValue\(\)', 
+                      r'Comparator.comparingLong(e -> e.getValue().sum())', code)
+        tips.append("🛠️ <b>Logic Fix:</b> Enabled correct comparison for <code>LongAdder</code> values.")
 
     return code, tips
 
-# --- FLASK ROUTES (Keep these as they are) ---
 @app.route('/optimize', methods=['POST'])
 def optimize_route():
     data = request.json
