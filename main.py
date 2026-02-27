@@ -14,8 +14,7 @@ def universal_architect_optimizer(code):
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. SMART TYPE & MATH DETECTION (Point 1 & 3 Fix) ---
-    # Rule: Check if 'amount' is already BigDecimal or double
+    # --- 2. SMART TYPE & MATH DETECTION ---
     is_big_decimal = "BigDecimal amount" in code
     
     if "double amount" in code:
@@ -23,22 +22,17 @@ def universal_architect_optimizer(code):
         is_big_decimal = True
         tips.append("💰 <b>Type Fix:</b> Upgraded <code>double</code> to <code>BigDecimal</code> for precision.")
 
-    # Fix Arithmetic Generic Level:
     if is_big_decimal:
-        # ✅ FIX: Agar BigDecimal hai toh seedha .multiply use karo (No BigDecimal.valueOf bridge)
         code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
                       r'\1.amount.multiply(BigDecimal.valueOf(\1.quantity))', code)
     else:
-        # Agar double hai toh bridge zaruri hai (Safe fallback)
         code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
                       r'BigDecimal.valueOf(\1.amount).multiply(BigDecimal.valueOf(\1.quantity))', code)
 
-    # --- 3. DYNAMIC SINGLE-PASS TRANSFORMATION (Point 2 Fix) ---
-    # Hum 'transactions' ya '.stream()' pattern ko detect karke inject karenge
+    # --- 3. DYNAMIC SINGLE-PASS TRANSFORMATION ---
     if ".stream()" in code or "transactions" in code:
         tips.append("🚀 <b>Architect Flow:</b> Implementing Single-Pass O(n) with guaranteed variable safety.")
         
-        # Injection block jo compilation aur logic mistakes ko heal karta hai
         unified_engine = f"""
         // --- Architect Level: Unified Single-Pass Engine ---
         int capacity = (int)(transactions.size() / 0.75) + 1;
@@ -47,14 +41,12 @@ def universal_architect_optimizer(code):
         ConcurrentMap<String, LongAdder> productSales = new ConcurrentHashMap<>(capacity);
 
         transactions.parallelStream().filter(t -> !t.failed).forEach(t -> {{
-            // ✅ FIX: Type-aware calculation
             BigDecimal val = {"t.amount" if is_big_decimal else "BigDecimal.valueOf(t.amount)"}.multiply(BigDecimal.valueOf(t.quantity));
             revenueByCategory.merge(t.category, val, BigDecimal::add);
             userSpending.merge(t.userId, val, BigDecimal::add);
             productSales.computeIfAbsent(t.productId, k -> new LongAdder()).add(t.quantity);
         }});
 
-        // ✅ FIX: Guaranteed Top-K variables (PriorityQueue on BigDecimal values)
         PriorityQueue<Map.Entry<String, BigDecimal>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
         for (Map.Entry<String, BigDecimal> entry : userSpending.entrySet()) {{
             pq.offer(entry);
@@ -65,16 +57,19 @@ def universal_architect_optimizer(code):
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
         """
-        # Purane markers ya messy loops ko replace karna
         code = re.sub(r'// 1️⃣.*?productSales\s*=\s*.*?\.collect\(.*?\);', unified_engine, code, flags=re.DOTALL)
 
-    # --- 4. FIX: LONGADDER COMPARISON (Point 3 Fix) ---
-    # Rule: Use .sum() only when dealing with LongAdder maps
-    if "productSales" in code:
-        # Generic replacement for LongAdder entry sets
-        code = re.sub(r'productSales\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)', 
-                      r'productSales.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
-        tips.append("🛠️ <b>Logic Fix:</b> Enabled <code>LongAdder::sum</code> for correct Map comparison.")
+    # --- 4. FIX: GENERIC LONGADDER COMPARISON (Corrected & Enhanced) ---
+    # Rule: LongAdder is NOT Comparable. We must use .sum() in the comparator.
+    if "LongAdder" in code:
+        # Search for any map entry stream that tries to find max/min using natural order on LongAdder
+        # This regex catches: anyMap.entrySet().stream().max(Map.Entry.comparingByValue())
+        generic_longadder_pattern = r'(\w+)\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
+        
+        if re.search(generic_longadder_pattern, code):
+            code = re.sub(generic_longadder_pattern, 
+                          r'\1.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
+            tips.append("🛠️ <b>Compilation Fix:</b> Fixed <code>LongAdder</code> comparison using <code>.sum()</code>.")
 
     return code, tips
 
