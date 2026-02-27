@@ -14,33 +14,29 @@ def universal_architect_optimizer(code):
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. DYNAMIC CONTEXT DISCOVERY (CRITICAL FIX) ---
-    # Point 1 Fix: signature se list name uthana (e.g. List<Transaction> data -> 'data')
-    # Ye 'util' wala error hamesha ke liye khatam kar dega.
+    # --- 2. DYNAMIC CONTEXT DISCOVERY (FIX 1: Variable Sync) ---
+    # Signature se list name nikalna taaki method body ke logic se sync rahe
     sig_match = re.search(r'\(List<.*?>\s+(\w+)\)', code)
     list_name = sig_match.group(1) if sig_match else "data"
     
-    # Agar signature nahi mila toh code body se discovery
-    if not sig_match:
-        list_match = re.search(r'(?:List<.*?>|var)\s+(\w+)\s*=', code) or re.search(r'(\w+)\.(?:stream|parallelStream)', code)
-        list_name = list_match.group(1) if list_match else "data"
-    
-    # Item detection (dynamic forEach or Lambda)
+    # Item name detection
     item_match = re.search(r'for\s*\(\w+\s+(\w+)\s*:', code) or re.search(r'(\w+)\s*->', code)
     item_name = item_match.group(1).strip() if item_match else "t"
 
     # --- 3. THE 3-POINT OPTIMIZATION ENGINE ---
     is_n_squared = ".stream()" in code and (".filter(" in code or ".anyMatch(" in code)
+    # Check if user is using double for money
     has_double = bool(re.search(r'double\s+\w+\s*=\s*0', code))
     
     if is_n_squared or "for(" in code:
-        tips.append(f"💎 <b>Architect Fix:</b> Upgraded O(n²) bottleneck to O(n) using Dynamic Frequency Map.")
+        tips.append(f"💎 <b>Architect Fix:</b> Upgraded O(n²) bottleneck to O(n) using Frequency Mapping.")
         if has_double:
-            tips.append(f"⚖️ <b>Precision Fix:</b> Fixed Floating-point risk by using <code>BigDecimal</code>.")
+            tips.append(f"⚖️ <b>Precision Fix:</b> Switched to <code>BigDecimal</code> for financial accuracy.")
 
+        # Logic for frequency map
         freq_map_logic = f"Map<String, Long> counts = {list_name}.parallelStream().collect(Collectors.groupingBy(x -> x.id, Collectors.counting()));"
         
-        # Point 2 Fix: Added proper \\n for Java printf formatting
+        # FIX 2: Single-line printf with proper escaping to avoid Java syntax errors
         optimized_block = f"""
         // --- Architect Grade: O(n) Optimized Engine ---
         long startTime = System.nanoTime();
@@ -56,7 +52,7 @@ def universal_architect_optimizer(code):
         System.out.println("Optimized Result: " + finalTotal);
         """
 
-        # Dynamic replacement of inefficient structures
+        # Purane inefficient code ko delete karke naya block inject karna
         code = re.sub(r'double\s+(\w+)\s*=\s*0;.*?System\.out\.println\(.*?\);', optimized_block, code, flags=re.DOTALL)
         code = re.sub(r'for\s*\(.*?\)\s*\{.*?System\.out\.println\(.*?\);?\s*\}', optimized_block, code, flags=re.DOTALL)
 
