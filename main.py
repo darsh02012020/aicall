@@ -15,31 +15,28 @@ def universal_architect_optimizer(code):
             code = f"import {imp};\n" + code
 
     # 2. DYNAMIC VARIABLE DISCOVERY
-    # List name dhoondna (e.g., transactions)
     list_match = re.search(r'List<\w+>\s+(\w+)\s*=', code)
     list_name = list_match.group(1) if list_match else "inputList"
     
-    # Lambda item name (e.g., t, obj, item)
     item_match = re.search(r'(\w+)\s*->', code)
     item_name = item_match.group(1).strip() if item_match else "t"
 
-    # 3. CLASS SCHEMA DISCOVERY (Generic Field Detection)
+    # 3. CLASS SCHEMA DISCOVERY
     fields_with_types = re.findall(r'(\w+)\s+(\w+);', code)
     numeric_fields = [f[1] for f in fields_with_types if f[0].lower() in ['double', 'int', 'long', 'bigdecimal', 'float']]
     id_fields = [f[1] for f in fields_with_types if f[0] == 'String']
     bool_fields = [f[1] for f in fields_with_types if f[0].lower() == 'boolean']
 
-    # Smart Numeric Context
     amt_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["amt", "price", "val", "amount"])), numeric_fields[0] if numeric_fields else "amount")
     qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity"]) and f != amt_f), numeric_fields[1] if len(numeric_fields) > 1 else "1")
     fail_f = next((f for f in bool_fields if any(x in f.lower() for x in ["fail", "error", "valid"])), None)
 
-    # 4. DEEP MAP DISCOVERY (Even if not declared)
-    # Checks for map usage in sorted(), println(), or max()
+    # 4. DEEP MAP DISCOVERY (Avoiding naming collisions)
     used_maps = set(re.findall(r'(\w+)\.entrySet\(\)', code) + re.findall(r'System\.out\.println\((\w+)\)', code))
     
     # 5. GLOBAL CLEANER
     clean_patterns = [
+        rf'ConcurrentMap<.*?>\s+\w+\s*=\s*new\s*ConcurrentHashMap.*?;', # Clean old map declarations if any
         rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
         rf'{list_name}\.(?:parallelStream|stream).*?;',
         rf'List<String>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
@@ -53,29 +50,39 @@ def universal_architect_optimizer(code):
     merge_logics = []
 
     for m_name in used_maps:
-        # Determine if it's a counter (LongAdder) or value map (BigDecimal)
-        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total_items"])
+        # --- FIX: Collision Prevention ---
+        # Agar Map aur List ka naam same hai, toh Map ka naam badal do
+        map_var_name = f"{m_name}Map" if re.search(rf'List<String>\s+{m_name}\s*=', code) else m_name
+        
+        # FIX: Replace usages of the map in the rest of the code if name changed
+        if map_var_name != m_name:
+            code = code.replace(f"{m_name}.entrySet()", f"{map_var_name}.entrySet()")
+            code = code.replace(f"System.out.println({m_name})", f"System.out.println({map_var_name})")
+
+        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total"])
         final_v_type = "LongAdder" if is_counter else "BigDecimal"
         
-        # Smart Key selection based on Map name
+        # Smart Key: If "product" is in map name, use productId etc.
         best_key = next((f for f in id_fields if f.lower() in m_name.lower()), None)
         if not best_key:
-            best_key = next((f for f in id_fields if any(x in f.lower() for x in ["id", "key", "name"])), id_fields[0] if id_fields else "id")
+            # Contextual backup keys
+            if is_counter:
+                best_key = next((f for f in id_fields if "product" in f.lower() or "item" in f.lower()), id_fields[0])
+            else:
+                best_key = next((f for f in id_fields if "user" in f.lower() or "cat" in f.lower()), id_fields[0])
         
         m_cap = '64' if 'cat' in best_key.lower() or 'type' in best_key.lower() else 'capacity'
-        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {m_name} = new ConcurrentHashMap<>({m_cap});"
+        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {map_var_name} = new ConcurrentHashMap<>({m_cap});"
         
         if final_v_type == "BigDecimal":
-            merge_logics.append(f"{m_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
+            merge_logics.append(f"{map_var_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
         else:
-            merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
+            merge_logics.append(f"{map_var_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
 
-    # Dynamic Calculation Logic
     calc_val = f"BigDecimal.valueOf({item_name}.{amt_f})"
     if qty_f != "1":
         calc_val += f".multiply(BigDecimal.valueOf({item_name}.{qty_f}))"
 
-    # Failed check logic
     filter_logic = f"if ({item_name} == null"
     if fail_f: filter_logic += f" || {item_name}.{fail_f}"
     filter_logic += ") return;"
@@ -98,10 +105,9 @@ def universal_architect_optimizer(code):
         System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
     """
 
-    # Insertion: Find the line after data generation
     code = re.sub(rf'({list_name}\s*=\s*.*?DataGenerator.*?;)', r'\1\n' + optimized_block, code, flags=re.DOTALL)
     
-    tips.append("🛡️ <b>Self-Healing:</b> Discovered used maps and injected missing declarations dynamically.")
+    tips.append("🛡️ <b>Architect Fixes:</b> Resolved naming collisions and optimized semantic key mapping.")
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
