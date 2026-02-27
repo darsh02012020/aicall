@@ -8,7 +8,7 @@ CORS(app)
 def universal_architect_optimizer(code):
     tips = []
     
-    # 1. ARCHITECT IMPORTS
+    # 1. ARCHITECT IMPORTS (Added dynamic set to avoid duplicates)
     needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*", "java.util.stream.*"]
     for imp in needed_imports:
         if f"import {imp};" not in code:
@@ -22,11 +22,12 @@ def universal_architect_optimizer(code):
     item_name = item_match.group(1).strip() if item_match else "obj"
 
     # 3. CLASS SCHEMA DISCOVERY (MetaData Extraction)
-    fields_with_types = re.findall(r'(\w+)\s+(\w+);', code) # Simplified to catch any type
+    # Catching all fields and their types dynamically
+    fields_with_types = re.findall(r'(\w+)\s+(\w+);', code)
     numeric_fields = [f[1] for f in fields_with_types if f[0].lower() in ['double', 'int', 'long', 'bigdecimal', 'float']]
     id_fields = [f[1] for f in fields_with_types if f[0] == 'String']
 
-    # Smart Heuristics for Calculation (Fields like amount, price, quantity)
+    # Smart Heuristics for Calculation
     amt_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["amt", "price", "val", "amount", "cost"])), numeric_fields[0] if numeric_fields else "amount")
     qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity", "unit"]) and f != amt_f), numeric_fields[1] if len(numeric_fields) > 1 else "1")
 
@@ -37,7 +38,8 @@ def universal_architect_optimizer(code):
     clean_patterns = [
         rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
         rf'{list_name}\.stream\(\).*?\.forEach\(.*?\);',
-        rf'List<String>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);'
+        rf'List<String>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
+        rf'//\s*\d+️⃣.*?\n' # Deletes old comment markers
     ]
     for pattern in clean_patterns:
         code = re.sub(pattern, '', code, flags=re.DOTALL)
@@ -49,16 +51,24 @@ def universal_architect_optimizer(code):
     for v_type, m_name in map_info:
         final_v_type = "LongAdder" if any(x in v_type for x in ["Integer", "Long", "Int"]) else "BigDecimal"
         
-        # --- NEW: Smart Key Detection Logic ---
-        # Map ke naam ke basis par sahi field dhoondna (e.g. 'category' for 'revenueByCategory')
+        # --- ENHANCED: Context-Aware Key Mapping ---
+        # Logic: Find best ID field based on Map name context
+        best_key = None
+        # Priority 1: Direct name match (category in revenueByCategory)
         best_key = next((f for f in id_fields if f.lower() in m_name.lower()), None)
+        
+        # Priority 2: Semantic match for LongAdder (usually productId or itemId)
+        if not best_key and final_v_type == "LongAdder":
+            best_key = next((f for f in id_fields if any(x in f.lower() for x in ["product", "item", "sku", "code"])), None)
+        
+        # Priority 3: Default to first available ID or generic 'id'
         if not best_key:
             best_key = next((f for f in id_fields if any(x in f.lower() for x in ["id", "key", "name"])), id_fields[0] if id_fields else "id")
         
-        # Initialization
-        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {m_name} = new ConcurrentHashMap<>({ '64' if 'cat' in best_key.lower() else 'capacity' });"
+        # Capacity logic: Small for categories, large for IDs
+        m_cap = '64' if 'cat' in best_key.lower() or 'type' in best_key.lower() else 'capacity'
+        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {m_name} = new ConcurrentHashMap<>({m_cap});"
         
-        # Merge Logic
         if final_v_type == "BigDecimal":
             merge_logics.append(f"{m_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
         else:
@@ -87,10 +97,10 @@ def universal_architect_optimizer(code):
         System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
     """
 
-    # Injecting the block
-    code = re.sub(rf'// 1️⃣.*|{list_name}\.stream\(\).*?;', optimized_block, code, flags=re.DOTALL, count=1)
+    # Injecting the block (finds first method call or comment to replace)
+    code = re.sub(rf'//\s*1️⃣.*|{list_name}\.(?:parallelStream|stream).*?;', optimized_block, code, flags=re.DOTALL, count=1)
     
-    tips.append("🚀 <b>Smart Context:</b> Automatically mapped Keys (Category/ID) by analyzing Map names.")
+    tips.append("🚀 <b>Architect Meta-Discovery:</b> All keys were dynamically mapped by correlating Map names with Class fields.")
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
