@@ -14,63 +14,74 @@ def universal_architect_optimizer(code):
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. FIX: TYPE MISMATCH & PRECISION (Point 1 & 3) ---
-    # Rule: Convert double fields to BigDecimal for financial safety
+    # --- 2. SMART TYPE & MATH DETECTION (Point 1 & 3 Fix) ---
+    # Rule: Check if 'amount' is already BigDecimal or double
+    is_big_decimal = "BigDecimal amount" in code
+    
     if "double amount" in code:
         code = code.replace("double amount", "BigDecimal amount")
-        tips.append("💰 <b>Type Fix:</b> Upgraded <code>double</code> to <code>BigDecimal</code> for financial precision.")
-    
-    # Fix arithmetic syntax: t.amount * t.quantity -> BigDecimal safe multiply
-    # We use BigDecimal.valueOf() as a safety bridge for any numeric type
-    code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
-                  r'BigDecimal.valueOf(\1.amount).multiply(BigDecimal.valueOf(\1.quantity))', code)
-    
-    # Fix standard multiply call if it's missing valueOf bridge
-    code = re.sub(r'(\w+)\.amount\.multiply', r'BigDecimal.valueOf(\1.amount).multiply', code)
+        is_big_decimal = True
+        tips.append("💰 <b>Type Fix:</b> Upgraded <code>double</code> to <code>BigDecimal</code> for precision.")
 
-    # --- 3. FORCE SINGLE-PASS O(n) & GUARANTEED VARIABLES (Point 2) ---
-    if code.count(".stream()") > 1 or "transactions" in code:
-        tips.append("🚀 <b>Architect Flow:</b> Implementing Single-Pass O(n) with thread-safe aggregation.")
+    # Fix Arithmetic Generic Level:
+    if is_big_decimal:
+        # ✅ FIX: Agar BigDecimal hai toh seedha .multiply use karo (No BigDecimal.valueOf bridge)
+        code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
+                      r'\1.amount.multiply(BigDecimal.valueOf(\1.quantity))', code)
+    else:
+        # Agar double hai toh bridge zaruri hai (Safe fallback)
+        code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
+                      r'BigDecimal.valueOf(\1.amount).multiply(BigDecimal.valueOf(\1.quantity))', code)
+
+    # --- 3. DYNAMIC SINGLE-PASS TRANSFORMATION (Point 2 Fix) ---
+    # Hum 'transactions' ya '.stream()' pattern ko detect karke inject karenge
+    if ".stream()" in code or "transactions" in code:
+        tips.append("🚀 <b>Architect Flow:</b> Implementing Single-Pass O(n) with guaranteed variable safety.")
         
-        unified_engine = """
+        # Injection block jo compilation aur logic mistakes ko heal karta hai
+        unified_engine = f"""
         // --- Architect Level: Unified Single-Pass Engine ---
         int capacity = (int)(transactions.size() / 0.75) + 1;
         ConcurrentMap<String, BigDecimal> revenueByCategory = new ConcurrentHashMap<>(64);
         ConcurrentMap<String, BigDecimal> userSpending = new ConcurrentHashMap<>(capacity);
         ConcurrentMap<String, LongAdder> productSales = new ConcurrentHashMap<>(capacity);
 
-        transactions.parallelStream().filter(t -> !t.failed).forEach(t -> {
-            BigDecimal val = BigDecimal.valueOf(t.amount).multiply(BigDecimal.valueOf(t.quantity));
+        transactions.parallelStream().filter(t -> !t.failed).forEach(t -> {{
+            // ✅ FIX: Type-aware calculation
+            BigDecimal val = {"t.amount" if is_big_decimal else "BigDecimal.valueOf(t.amount)"}.multiply(BigDecimal.valueOf(t.quantity));
             revenueByCategory.merge(t.category, val, BigDecimal::add);
             userSpending.merge(t.userId, val, BigDecimal::add);
             productSales.computeIfAbsent(t.productId, k -> new LongAdder()).add(t.quantity);
-        });
+        }});
 
-        // Guaranteed Top-K Discovery (Prevents Missing Variable Error)
+        // ✅ FIX: Guaranteed Top-K variables (PriorityQueue on BigDecimal values)
         PriorityQueue<Map.Entry<String, BigDecimal>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
-        userSpending.entrySet().forEach(e -> {
-            pq.offer(e);
+        for (Map.Entry<String, BigDecimal> entry : userSpending.entrySet()) {{
+            pq.offer(entry);
             if (pq.size() > 5) pq.poll();
-        });
-        List<String> topUsers = pq.stream().map(Map.Entry::getKey).collect(Collectors.toList());
+        }}
+        List<String> topUsers = pq.stream()
+                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
         """
-        # Replacing the multi-stream/loop mess with the unified engine
+        # Purane markers ya messy loops ko replace karna
         code = re.sub(r'// 1️⃣.*?productSales\s*=\s*.*?\.collect\(.*?\);', unified_engine, code, flags=re.DOTALL)
 
-    # --- 4. FIX: LONGADDER COMPARISON (Point 3) ---
+    # --- 4. FIX: LONGADDER COMPARISON (Point 3 Fix) ---
+    # Rule: Use .sum() only when dealing with LongAdder maps
     if "productSales" in code:
-        # LongAdder doesn't implement Comparable, must use .sum() or .longValue()
-        code = re.sub(r'Map\.Entry\.comparingByValue\(\)', 
-                      r'Comparator.comparingLong(e -> e.getValue().sum())', code)
-        tips.append("🛠️ <b>Logic Fix:</b> Enabled correct comparison for <code>LongAdder</code> values.")
+        # Generic replacement for LongAdder entry sets
+        code = re.sub(r'productSales\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)', 
+                      r'productSales.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
+        tips.append("🛠️ <b>Logic Fix:</b> Enabled <code>LongAdder::sum</code> for correct Map comparison.")
 
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
 def optimize_route():
     data = request.json
-    original_code = data.get('code', '')
-    opt_code, tips = universal_architect_optimizer(original_code)
+    opt_code, tips = universal_architect_optimizer(data.get('code', ''))
     return jsonify({"optimized_code": opt_code, "tips": tips})
 
 if __name__ == '__main__':
