@@ -8,89 +8,92 @@ CORS(app)
 def universal_architect_optimizer(code):
     tips = []
     
-    # 1. ARCHITECT LEVEL IMPORTS
+    # 1. ARCHITECT IMPORTS (Ensuring everything is covered)
     needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*", "java.util.stream.*"]
     for imp in needed_imports:
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # 2. DYNAMIC DISCOVERY (Variable Names)
+    # 2. DYNAMIC VARIABLE DISCOVERY (No Hardcoding)
+    # List name (e.g., 'transactions', 'orders', 'students')
     list_match = re.search(r'(\w+)\.(?:parallelStream|stream)\(\)', code)
-    list_name = list_match.group(1) if list_match else "dataList"
+    list_name = list_match.group(1) if list_match else "inputList"
     
+    # Lambda item name (e.g., 't ->', 'item ->', 'obj ->')
     item_match = re.search(r'(\w+)\s*->', code)
-    item_name = item_match.group(1).strip() if item_match else "obj"
+    item_name = item_match.group(1).strip() if item_match else "x"
 
-    # Map information extraction (Value Types and Names)
-    # Pattern detects: Map<Key, Value> name = ...
-    map_info = re.findall(r'(?:Map|ConcurrentMap)<\s*\w+\s*,\s*(\w+)\s*>\s+(\w+)\s*=', code)
-
-    # 3. CLASS FIELD DISCOVERY (Ab kuch bhi static nahi)
-    # Hum dhoond rahe hain ki Transaction/Object class mein kaunsi fields hain
-    fields = re.findall(r'\b(?:String|double|int|long|BigDecimal)\b\s+(\w+);', code)
+    # 3. CLASS SCHEMA DISCOVERY (Dynamic Field Mapping)
+    # Extracts all fields from the Java Class provided in input
+    fields_with_types = re.findall(r'(String|double|int|long|BigDecimal|Float)\s+(\w+);', code)
     
-    # Identify "Quantity" and "Amount" style fields dynamically
-    qty_field = next((f for f in fields if any(x in f.lower() for x in ["qty", "quantity", "count", "unit"])), "quantity")
-    amt_field = next((f for f in fields if any(x in f.lower() for x in ["amt", "amount", "price", "value"])), "amount")
-    key_field = next((f for f in fields if any(x in f.lower() for x in ["id", "key", "name", "category"])), "id")
+    # Smart Mapping: Logic based on context, not just names
+    # Finding Numeric fields for calculations
+    numeric_fields = [f[1] for f in fields_with_types if f[0] in ['double', 'int', 'long', 'BigDecimal', 'Float']]
+    # Finding String/ID fields for grouping
+    id_fields = [f[1] for f in fields_with_types if f[0] == 'String']
 
-    # 4. GLOBAL CLEANER
-    redundant_pattern = rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);'
-    if len(re.findall(redundant_pattern, code, flags=re.DOTALL)) > 0:
-        code = re.sub(redundant_pattern, '', code, flags=re.DOTALL)
-        tips.append("🧹 <b>Cleaner:</b> Dynamically flushed all redundant stream scans.")
+    # Default heuristic if detection is fuzzy
+    amt_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["amt", "price", "val", "amount", "cost"])), numeric_fields[0] if numeric_fields else "amount")
+    qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity", "unit"]) and f != amt_f), numeric_fields[1] if len(numeric_fields) > 1 else "1")
+    key_f = next((f for f in id_fields if any(x in f.lower() for x in ["id", "cat", "key", "name", "type"])), id_fields[0] if id_fields else "id")
 
-    # 5. DYNAMIC INITIALIZATION
+    # 4. MAP & TASK DISCOVERY
+    # Detects what maps the user wants to populate
+    map_info = re.findall(r'(?:Map|ConcurrentMap)<\s*\w+\s*,\s*(\w+)\s*>\s+(\w+)\s*=', code)
+    
+    # 5. THE GLOBAL CLEANER (N-Scans to 1-Scan)
+    # Removes any number of stream/groupingBy blocks
+    clean_patterns = [
+        rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
+        rf'{list_name}\.stream\(\).*?\.forEach\(.*?\);'
+    ]
+    for pattern in clean_patterns:
+        if re.search(pattern, code, flags=re.DOTALL):
+            code = re.sub(pattern, '', code, flags=re.DOTALL)
+    
+    tips.append(f"🧹 <b>Universal Cleaner:</b> Collapsed all redundant scans for <code>{list_name}</code>.")
+
+    # 6. DYNAMIC ARCHITECT ENGINE GENERATION
     init_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
+    merge_logics = []
+
     for v_type, m_name in map_info:
-        # Long/Integer ko LongAdder mein badalna (Concurrency ke liye)
+        # Convert simple Maps to Concurrent + Dynamic Capacity
         final_type = "LongAdder" if any(x in v_type for x in ["Integer", "Long", "Int"]) else "BigDecimal"
         init_logic += f"\n        ConcurrentMap<String, {final_type}> {m_name} = new ConcurrentHashMap<>(capacity);"
-    
-    code = re.sub(rf'({list_name}\.(?:parallelStream|stream))', init_logic + r"\n\n        \1", code, count=1)
-
-    # 6. ZERO-STATIC MERGE ENGINE
-    merge_logics = []
-    for v_type, m_name in map_info:
-        if any(x in v_type for x in ["Double", "BigDecimal", "Float"]):
-            # Use discovered fields
-            merge_logics.append(f"{m_name}.merge({item_name}.{key_field}, val, BigDecimal::add);")
+        
+        # Build merge logic based on Type, not name
+        if final_type == "BigDecimal":
+            merge_logics.append(f"{m_name}.merge({item_name}.{key_f}, val, BigDecimal::add);")
         else:
-            merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.{key_field}, k -> new LongAdder()).add({item_name}.{qty_field});")
+            merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.{key_f}, k -> new LongAdder()).add({item_name}.{qty_f});")
+
+    # Dynamic Calculation: BigDecimal safety
+    calc_val = f"BigDecimal.valueOf({item_name}.{amt_f})"
+    if qty_f != "1":
+        calc_val += f".multiply(BigDecimal.valueOf({item_name}.{qty_f}))"
 
     optimized_block = f"""
-        // --- Architect Level: Dynamic Unified Engine ---
+        // --- Architect Level: Dynamic Unified Engine (O(n)) ---
         long startTime = System.nanoTime();
-        LongAdder errorCount = new LongAdder();
+        LongAdder errors = new LongAdder();
+        {init_logic}
 
         {list_name}.parallelStream().forEach({item_name} -> {{
             try {{
                 if ({item_name} == null) return;
-                BigDecimal val = BigDecimal.valueOf({item_name}.{amt_field}).multiply(BigDecimal.valueOf({item_name}.{qty_field}));
+                BigDecimal val = {calc_val};
                 {" ".join(merge_logics)}
             }} catch (Exception e) {{
-                errorCount.increment();
+                errors.increment();
             }}
         }});
-        long endTime = System.nanoTime();
-        System.out.printf("Execution: %.2f ms | Faults: %d%n", (endTime - startTime) / 1e6, errorCount.sum());
+        System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
     """
-    
-    # Final replacement
-    code = re.sub(rf'{list_name}\.(?:parallelStream|stream).*?\.forEach\(.*?\);|// 1️⃣.*?\n.*?(?={list_name})', optimized_block, code, flags=re.DOTALL, count=1)
 
-    # 7. DYNAMIC TOP-K HEALER
-    if "top" in code.lower() or "limit" in code:
-        # Dhoondte hain konsa map sort ho raha hai
-        sort_map_match = re.search(r'(\w+)\.entrySet\(\)\.stream\(\)\.sorted', code)
-        sort_map = sort_map_match.group(1) if sort_map_match else (map_info[0][1] if map_info else "results")
-        
-        pq_logic = f"""
-        List<String> topResults = {sort_map}.entrySet().stream()
-                .sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())
-                .limit(5).map(Map.Entry::getKey).collect(Collectors.toList());
-        """
-        code = re.sub(r'List<.*?>\s+\w+\s*=\s*.*?\.sorted\(.*?\)\.limit\(.*?\).*?\.collect\(.*?\);', pq_logic, code, flags=re.DOTALL)
+    # Inject the engine into the main method area
+    code = re.sub(rf'// 1️⃣.*|{list_name}\.stream\(\).*?;', optimized_block, code, flags=re.DOTALL, count=1)
 
     return code, tips
 
