@@ -14,62 +14,58 @@ def universal_architect_optimizer(code):
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
-    # --- 2. SMART TYPE & MATH DETECTION ---
-    is_big_decimal = "BigDecimal amount" in code
+    # --- 2. DYNAMIC CONTEXT DISCOVERY ---
+    # List aur Item detect karna (e.g., transactions, t)
+    list_match = re.search(r'(\w+)\.(?:parallelStream|stream)\(\)', code)
+    list_name = list_match.group(1) if list_match else "list"
     
-    if "double amount" in code:
-        code = code.replace("double amount", "BigDecimal amount")
-        is_big_decimal = True
-        tips.append("💰 <b>Type Fix:</b> Upgraded <code>double</code> to <code>BigDecimal</code> for precision.")
+    item_match = re.search(r'\(([^)]+)\)\s*->', code) or re.search(r'(\w+)\s*->', code)
+    item_name = item_match.group(1).strip() if item_match else "t"
 
-    if is_big_decimal:
-        code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
-                      r'\1.amount.multiply(BigDecimal.valueOf(\1.quantity))', code)
-    else:
-        code = re.sub(r'(\w+)\.amount\s*\*\s*\1\.quantity', 
-                      r'BigDecimal.valueOf(\1.amount).multiply(BigDecimal.valueOf(\1.quantity))', code)
-
-    # --- 3. DYNAMIC SINGLE-PASS TRANSFORMATION ---
-    if ".stream()" in code or "transactions" in code:
-        tips.append("🚀 <b>Architect Flow:</b> Implementing Single-Pass O(n) with guaranteed variable safety.")
+    # Maps Detection: Hum dhundte hain ki user ne kaunse Maps declare kiye hain
+    # Pattern: Map name aur uska purpose (revenue, sales, spending)
+    map_declarations = re.findall(r'(?:Map|ConcurrentMap)<.*?>\s+(\w+)\s*=', code)
+    
+    # --- 3. DYNAMIC TRANSFORMATION ENGINE ---
+    if ".stream()" in code and map_declarations:
+        tips.append(f"🚀 <b>Architect Flow:</b> Performed Context-Aware O(n) Optimization on <code>{list_name}</code>.")
         
-        unified_engine = f"""
-        // --- Architect Level: Unified Single-Pass Engine ---
-        int capacity = (int)(transactions.size() / 0.75) + 1;
-        ConcurrentMap<String, BigDecimal> revenueByCategory = new ConcurrentHashMap<>(64);
-        ConcurrentMap<String, BigDecimal> userSpending = new ConcurrentHashMap<>(capacity);
-        ConcurrentMap<String, LongAdder> productSales = new ConcurrentHashMap<>(capacity);
+        # Build the dynamic forEach block based ONLY on existing maps
+        merge_logics = []
+        
+        # Har map ke liye sahi merge logic generate karna
+        for m_name in map_declarations:
+            if "rev" in m_name.lower() or "sum" in m_name.lower() or "total" in m_name.lower():
+                merge_logics.append(f"{m_name}.merge({item_name}.getCategory(), val, BigDecimal::add);")
+            elif "spend" in m_name.lower() or "user" in m_name.lower():
+                merge_logics.append(f"{m_name}.merge({item_name}.getUserId(), val, BigDecimal::add);")
+            elif "sales" in m_name.lower() or "count" in m_name.lower() or "prod" in m_name.lower():
+                merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.getProductId(), k -> new LongAdder()).add({item_name}.getQuantity());")
 
-        transactions.parallelStream().filter(t -> !t.failed).forEach(t -> {{
-            BigDecimal val = {"t.amount" if is_big_decimal else "BigDecimal.valueOf(t.amount)"}.multiply(BigDecimal.valueOf(t.quantity));
-            revenueByCategory.merge(t.category, val, BigDecimal::add);
-            userSpending.merge(t.userId, val, BigDecimal::add);
-            productSales.computeIfAbsent(t.productId, k -> new LongAdder()).add(t.quantity);
+        # Reconstruct calculation logic
+        is_bd = "BigDecimal" in code
+        calc = f"{item_name}.getAmount()" if is_bd else f"BigDecimal.valueOf({item_name}.getAmount())"
+        
+        # Create the optimized block
+        optimized_block = f"""
+        // --- Optimized Single-Pass Engine ---
+        {list_name}.parallelStream().forEach({item_name} -> {{
+            BigDecimal val = {calc}.multiply(BigDecimal.valueOf({item_name}.getQuantity()));
+            {" ".join(merge_logics)}
         }});
-
-        PriorityQueue<Map.Entry<String, BigDecimal>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
-        for (Map.Entry<String, BigDecimal> entry : userSpending.entrySet()) {{
-            pq.offer(entry);
-            if (pq.size() > 5) pq.poll();
-        }}
-        List<String> topUsers = pq.stream()
-                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
         """
-        code = re.sub(r'// 1️⃣.*?productSales\s*=\s*.*?\.collect\(.*?\);', unified_engine, code, flags=re.DOTALL)
-
-    # --- 4. FIX: GENERIC LONGADDER COMPARISON (Corrected & Enhanced) ---
-    # Rule: LongAdder is NOT Comparable. We must use .sum() in the comparator.
-    if "LongAdder" in code:
-        # Search for any map entry stream that tries to find max/min using natural order on LongAdder
-        # This regex catches: anyMap.entrySet().stream().max(Map.Entry.comparingByValue())
-        generic_longadder_pattern = r'(\w+)\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
         
-        if re.search(generic_longadder_pattern, code):
-            code = re.sub(generic_longadder_pattern, 
-                          r'\1.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
-            tips.append("🛠️ <b>Compilation Fix:</b> Fixed <code>LongAdder</code> comparison using <code>.sum()</code>.")
+        # Replace only the stream/loop part, keeping user's map declarations intact
+        code = re.sub(r'// 1️⃣.*?\.collect\(.*?\);', optimized_block, code, flags=re.DOTALL)
+
+    # --- 4. GENERIC LONGADDER HEALER (No Hardcoding) ---
+    # Kisi bhi variable par agar max() error hai, toh use theek karo
+    for m_name in map_declarations:
+        pattern = rf'{m_name}\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
+        if re.search(pattern, code):
+            code = re.sub(pattern, 
+                          f'{m_name}.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
+            tips.append(f"🛠️ <b>Healed:</b> Fixed <code>LongAdder</code> comparison for <code>{m_name}</code>.")
 
     return code, tips
 
