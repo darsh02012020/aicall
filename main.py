@@ -31,31 +31,22 @@ def universal_architect_optimizer(code):
     qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity"]) and f != amt_f), numeric_fields[1] if len(numeric_fields) > 1 else "1")
     fail_f = next((f for f in bool_fields if any(x in f.lower() for x in ["fail", "error", "valid"])), None)
 
-    # 4. DEEP MAP DISCOVERY & CLEANER
+    # 4. DEEP MAP DISCOVERY & REFERENCE FIXING
     used_maps = set(re.findall(r'(\w+)\.entrySet\(\)', code) + re.findall(r'System\.out\.println\((\w+)\)', code))
     
-    clean_patterns = [
-        rf'ConcurrentMap<.*?>\s+\w+\s*=\s*new\s*ConcurrentHashMap.*?;',
-        rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
-        rf'{list_name}\.(?:parallelStream|stream).*?;',
-        rf'List<String>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);'
-    ]
-    for pattern in clean_patterns:
-        code = re.sub(pattern, '', code, flags=re.DOTALL)
-
-    # 5. DYNAMIC ENGINE & SORTING FIXER
+    # 5. DYNAMIC ENGINE & PATCHING LOGIC
     init_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
     merge_logics = []
 
     for m_name in used_maps:
-        # Collision Check
+        # Resolve Variable Collisions
         is_clashing = re.search(rf'(?:List<String>|String)\s+{m_name}\s*=', code)
         actual_m_name = f"{m_name}Map" if is_clashing else m_name
         
         is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total"])
         final_v_type = "LongAdder" if is_counter else "BigDecimal"
         
-        # KEY MAPPING FIX: Accurate key selection
+        # KEY MAPPING FIX (Semantic accuracy)
         best_key = next((f for f in id_fields if f.lower() in m_name.lower()), None)
         if not best_key:
             best_key = next((f for f in id_fields if ("product" in f.lower() or "item" in f.lower()) and is_counter), 
@@ -63,24 +54,22 @@ def universal_architect_optimizer(code):
         
         init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {actual_m_name} = new ConcurrentHashMap<>({ '64' if 'cat' in best_key.lower() else 'capacity' });"
         
-        # Global Reference Update
+        # Syncing code references
         if actual_m_name != m_name:
             code = code.replace(f"{m_name}.entrySet()", f"{actual_m_name}.entrySet()")
             code = code.replace(f"System.out.println({m_name})", f"System.out.println({actual_m_name})")
 
-        # FIXING SORTING/MAX LOGIC IN EXISTING CODE
+        # PATCHING: Sorting & Max Logic for Type Safety
         if final_v_type == "BigDecimal":
-            # Fix BigDecimal sorting (Replace Double.compare)
             code = re.sub(rf'\.sorted\(.*?Double\.compare.*?\)', 
                           f'.sorted(Map.Entry.<String, BigDecimal>comparingByValue().reversed())', code)
             merge_logics.append(f"{actual_m_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
         else:
-            # Fix LongAdder Max logic
             code = re.sub(rf'\.max\(Map\.Entry\.comparingByValue\(\)\)', 
                           f'.max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
             merge_logics.append(f"{actual_m_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
 
-    # 6. FINAL BLOCK GENERATION
+    # 6. ENGINE BLOCK GENERATION
     filter_logic = f"if ({item_name} == null" + (f" || {item_name}.{fail_f}" if fail_f else "") + ") return;"
     
     optimized_block = f"""
@@ -101,9 +90,10 @@ def universal_architect_optimizer(code):
         System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
     """
 
+    # Final Injection
     code = re.sub(rf'({list_name}\s*=\s*.*?DataGenerator.*?;)', r'\1\n' + optimized_block, code, flags=re.DOTALL)
     
-    tips.append("🚀 <b>Full-Cycle Optimization:</b> Fixed Engine, Resolved Collisions, and Patched Sorting/Max logic for BigDecimal/LongAdder.")
+    tips.append("🛡️ <b>Validation Active:</b> Logic extraction and type-safe sorting patches applied successfully.")
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
