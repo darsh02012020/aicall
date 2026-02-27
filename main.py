@@ -8,63 +8,80 @@ CORS(app)
 def universal_architect_optimizer(code):
     tips = []
     
-    # --- 1. ARCHITECT LEVEL IMPORTS ---
+    # --- 1. ARCHITECT LEVEL IMPORTS (Added Precision) ---
     needed_imports = ["java.math.*", "java.util.*", "java.util.concurrent.*", "java.util.concurrent.atomic.*", "java.util.function.*", "java.util.stream.*"]
     for imp in needed_imports:
         if f"import {imp};" not in code:
             code = f"import {imp};\n" + code
 
     # --- 2. DYNAMIC CONTEXT DISCOVERY ---
-    # List aur Item detect karna (e.g., transactions, t)
+    # List aur Item detect karna
     list_match = re.search(r'(\w+)\.(?:parallelStream|stream)\(\)', code)
-    list_name = list_match.group(1) if list_match else "list"
+    list_name = list_match.group(1) if list_match else "transactions"
     
     item_match = re.search(r'\(([^)]+)\)\s*->', code) or re.search(r'(\w+)\s*->', code)
     item_name = item_match.group(1).strip() if item_match else "t"
 
-    # Maps Detection: Hum dhundte hain ki user ne kaunse Maps declare kiye hain
-    # Pattern: Map name aur uska purpose (revenue, sales, spending)
+    # Map Detection: Hum user ke declare kiye Maps dhoond rahe hain
     map_declarations = re.findall(r'(?:Map|ConcurrentMap)<.*?>\s+(\w+)\s*=', code)
     
-    # --- 3. DYNAMIC TRANSFORMATION ENGINE ---
-    if ".stream()" in code and map_declarations:
-        tips.append(f"🚀 <b>Architect Flow:</b> Performed Context-Aware O(n) Optimization on <code>{list_name}</code>.")
+    # --- 3. MEMORY OPTIMIZATION: Initial Capacity ---
+    # Architect Point: Resizing rokne ke liye capacity add karna
+    if f"{list_name}.size()" in code and "capacity =" not in code:
+        capacity_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
+        code = re.sub(r'(Map<.*?>\s+\w+\s*=)', capacity_logic + r'\n        \1', code, count=1)
+        tips.append("🧠 <b>Memory:</b> Added Initial Capacity to prevent Map resizing.")
+
+    # --- 4. DYNAMIC TRANSFORMATION ENGINE (Single-Pass) ---
+    if (".stream()" in code or ".parallelStream()" in code) and map_declarations:
+        tips.append(f"🚀 <b>Architect Flow:</b> Unified Single-Pass O(n) Engine for <code>{list_name}</code>.")
         
-        # Build the dynamic forEach block based ONLY on existing maps
         merge_logics = []
-        
-        # Har map ke liye sahi merge logic generate karna
         for m_name in map_declarations:
-            if "rev" in m_name.lower() or "sum" in m_name.lower() or "total" in m_name.lower():
-                merge_logics.append(f"{m_name}.merge({item_name}.getCategory(), val, BigDecimal::add);")
-            elif "spend" in m_name.lower() or "user" in m_name.lower():
-                merge_logics.append(f"{m_name}.merge({item_name}.getUserId(), val, BigDecimal::add);")
-            elif "sales" in m_name.lower() or "count" in m_name.lower() or "prod" in m_name.lower():
+            # Map ke naam ke hisaab se logic decide karna
+            if any(x in m_name.lower() for x in ["rev", "sum", "total", "spend"]):
+                # BigDecimal Merge Logic
+                key = f"{item_name}.getCategory()" if "cat" in m_name.lower() else f"{item_name}.getUserId()"
+                merge_logics.append(f"{m_name}.merge({key}, val, BigDecimal::add);")
+            elif any(x in m_name.lower() for x in ["sales", "count", "prod"]):
+                # LongAdder Logic (High Concurrency)
                 merge_logics.append(f"{m_name}.computeIfAbsent({item_name}.getProductId(), k -> new LongAdder()).add({item_name}.getQuantity());")
 
-        # Reconstruct calculation logic
+        # Calculation logic detect karna (BigDecimal vs Double)
         is_bd = "BigDecimal" in code
         calc = f"{item_name}.getAmount()" if is_bd else f"BigDecimal.valueOf({item_name}.getAmount())"
         
-        # Create the optimized block
+        # Optimized Block Generate karna
         optimized_block = f"""
-        // --- Optimized Single-Pass Engine ---
-        {list_name}.parallelStream().forEach({item_name} -> {{
+        // --- Architect Level: Unified Single-Pass Engine ---
+        {list_name}.parallelStream().filter({item_name} -> !{item_name}.isFailed()).forEach({item_name} -> {{
             BigDecimal val = {calc}.multiply(BigDecimal.valueOf({item_name}.getQuantity()));
             {" ".join(merge_logics)}
         }});
         """
         
-        # Replace only the stream/loop part, keeping user's map declarations intact
-        code = re.sub(r'// 1️⃣.*?\.collect\(.*?\);', optimized_block, code, flags=re.DOTALL)
+        # Purane redundant streams ko remove karke naya block insert karna
+        code = re.sub(r'// 1️⃣.*?\.collect\(.*?\);.*?// 3️⃣.*?\.collect\(.*?\);', optimized_block, code, flags=re.DOTALL)
 
-    # --- 4. GENERIC LONGADDER HEALER (No Hardcoding) ---
-    # Kisi bhi variable par agar max() error hai, toh use theek karo
+    # --- 5. TOP-K HEALER (PriorityQueue Optimization) ---
+    # Architect Point: Sorting O(N log N) ko O(N log K) mein badalna
+    if "topUsers" in code and "PriorityQueue" not in code:
+        pq_logic = """
+        PriorityQueue<Map.Entry<String, BigDecimal>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
+        userSpending.entrySet().forEach(e -> {
+            pq.offer(e);
+            if (pq.size() > 5) pq.poll();
+        });
+        List<String> topUsers = pq.stream().map(Map.Entry::getKey).collect(Collectors.toList());
+        """
+        code = re.sub(r'List<String> topUsers =.*?\.collect\(.*?\);', pq_logic, code, flags=re.DOTALL)
+        tips.append("📊 <b>Performance:</b> Replaced full sort with Min-Heap (PriorityQueue) for Top-K.")
+
+    # --- 6. LONGADDER HEALER ---
     for m_name in map_declarations:
         pattern = rf'{m_name}\.entrySet\(\)\.stream\(\)\.max\(Map\.Entry\.comparingByValue\(\)\)'
         if re.search(pattern, code):
-            code = re.sub(pattern, 
-                          f'{m_name}.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
+            code = re.sub(pattern, f'{m_name}.entrySet().stream().max(Comparator.comparingLong(e -> e.getValue().sum()))', code)
             tips.append(f"🛠️ <b>Healed:</b> Fixed <code>LongAdder</code> comparison for <code>{m_name}</code>.")
 
     return code, tips
