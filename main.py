@@ -7,35 +7,41 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# --- SMART OPTIMIZER ENGINE (Bina API wala Dimaag) ---
+# --- SMART OPTIMIZER ENGINE (Architect Mode) ---
 def heuristic_optimizer(code):
     tips = []
     optimized_code = code
 
-    # 1. Detect Large Data + Parallel Stream Suggestion
+    # 1. ARCHITECT REVIEW: Detect O(3n) vs O(n) - Multiple passes on same collection
+    # Agar orders list par baar baar loop chal raha hai (For revenue, then for spending, etc.)
+    loop_pattern = r'for\s*\(\s*Order\s+\w+\s*:\s*orders\s*\)'
+    loops = re.findall(loop_pattern, code)
+    if len(loops) > 1:
+        tips.append(f"🏗️ <b>Architectural Flaw:</b> You are iterating 'orders' {len(loops)} times. Use a <b>Single Pass Stream</b> to compute Revenue, Spending, and Product counts simultaneously.")
+
+    # 2. ALGO OPTIMIZATION: Sorting 1M records for Top 3 (O(n log n))
+    if ".sorted(" in code and ".limit(" in code:
+        tips.append("📉 <b>Algorithm Fix:</b> Sorting 1M records for just Top-3 is O(n log n). Use a <b>PriorityQueue (Min-Heap)</b> to do it in O(n log 3).")
+
+    # 3. PERFORMANCE: Parallel Stream on Large Data
     if ("1_000_000" in code or "1000000" in code) and ".parallelStream()" not in code:
         if ".stream()" in code:
             optimized_code = optimized_code.replace(".stream()", ".parallelStream()")
-            tips.append("⚡ <b>Performance:</b> 1M records detected. Switched to <b>parallelStream()</b> for multi-core speed.")
+            tips.append("⚡ <b>Performance:</b> Large dataset (1M) detected. Switched to <b>parallelStream()</b>.")
         else:
-            tips.append("💡 <b>Scalability:</b> For 1M records, consider using <b>Parallel Streams</b> to optimize CPU usage.")
+            tips.append("💡 <b>Scalability:</b> For 1,000,000+ records, consider using <b>Parallel Streams</b>.")
 
-    # 2. Detect Multiple Loops on same collection (Single Pass Check)
-    loop_count = len(re.findall(r'for\s*\(\s*Order\s+\w+\s*:\s*orders\s*\)', code))
-    if loop_count > 1:
-        tips.append(f"🔄 <b>Efficiency:</b> Detected {loop_count} separate loops over 'orders'. Merging them into one will save O(n) time.")
+    # 4. SAFETY: Thread Safety in Parallel Processing
+    if ".parallelStream()" in optimized_code and "new HashMap<>" in optimized_code:
+        tips.append("⚠️ <b>Thread Safety:</b> You are using parallelStream with a non-thread-safe HashMap. Use <b>ConcurrentHashMap</b> or <b>Collectors.groupingBy</b>.")
 
-    # 3. Top-K sorting vs PriorityQueue
-    if ".sorted(" in code and ".limit(" in code:
-        tips.append("📉 <b>Algorithm:</b> You are using full Sort O(n log n). For Top-3, a <b>PriorityQueue</b> is faster O(n log k).")
-
-    # 4. StringBuilder Check (String concatenation in loops)
+    # 5. MEMORY: StringBuilder for loop concatenations
     if re.search(r'for\s*\(.*\)\s*\{[^{}]*\+=\s*".*"', code) and "StringBuilder" not in code:
-        tips.append("📦 <b>Memory:</b> String concatenation found in loop. Use <b>StringBuilder</b> to avoid excessive Garbage Collection.")
+        tips.append("📦 <b>Memory:</b> Detected String concatenation in a loop. Use <b>StringBuilder</b> to reduce Heap pressure.")
 
-    # 5. Modern Java Collectors
-    if "Collectors.toList()" in code:
-        tips.append("✨ <b>Modern Java:</b> Use <b>Collectors.toUnmodifiableList()</b> if you don't need to change the list later.")
+    # 6. RECALCULATION: Check if revenue (qty * price) is repeated
+    if code.count("quantity * item.price") > 2:
+        tips.append("🔢 <b>Efficiency:</b> Revenue (qty * price) is recalculated multiple times. Store it in a variable during the first pass.")
 
     return optimized_code, tips
 
@@ -53,7 +59,7 @@ def optimize_code():
         "tips": tips
     })
 
-# --- EXISTING RUN LOGIC (DO NOT TOUCH) ---
+# --- EXISTING RUN LOGIC (DO NOT TOUCH - WORKING 100%) ---
 @app.route('/run', methods=['POST'])
 def run_code():
     data = request.json
@@ -62,6 +68,7 @@ def run_code():
     language = data.get('lang', 'java') 
 
     try:
+        # --- PYTHON LOGIC ---
         if language == 'python':
             file_path = "/tmp/script.py"
             with open(file_path, "w") as f:
@@ -76,6 +83,7 @@ def run_code():
             )
             return jsonify({"output": run_res.stdout + run_res.stderr})
 
+        # --- JAVA LOGIC ---
         else:
             match = re.search(r'public\s+class\s+(\w+)', code)
             if not match:
