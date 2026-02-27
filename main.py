@@ -31,53 +31,51 @@ def universal_architect_optimizer(code):
     qty_f = next((f for f in numeric_fields if any(x in f.lower() for x in ["qty", "count", "quantity"]) and f != amt_f), numeric_fields[1] if len(numeric_fields) > 1 else "1")
     fail_f = next((f for f in bool_fields if any(x in f.lower() for x in ["fail", "error", "valid"])), None)
 
-    # 4. DEEP MAP DISCOVERY (Avoiding naming collisions)
+    # 4. DEEP MAP DISCOVERY (Existing references detection)
     used_maps = set(re.findall(r'(\w+)\.entrySet\(\)', code) + re.findall(r'System\.out\.println\((\w+)\)', code))
     
-    # 5. GLOBAL CLEANER
+    # 5. GLOBAL CLEANER (Safe replacement)
     clean_patterns = [
-        rf'ConcurrentMap<.*?>\s+\w+\s*=\s*new\s*ConcurrentHashMap.*?;', # Clean old map declarations if any
         rf'Map<.*?>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
         rf'{list_name}\.(?:parallelStream|stream).*?;',
-        rf'List<String>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);',
-        rf'//\s*\d+️⃣.*?\n'
+        rf'List<String>\s+\w+\s*=\s*{list_name}\.stream\(\).*?\.collect\(.*?\);'
     ]
     for pattern in clean_patterns:
         code = re.sub(pattern, '', code, flags=re.DOTALL)
 
-    # 6. DYNAMIC ENGINE & DECLARATIONS
+    # 6. DYNAMIC ENGINE & COLLISION AVOIDANCE
     init_logic = f"\n        int capacity = (int)({list_name}.size() / 0.75) + 1;"
     merge_logics = []
 
     for m_name in used_maps:
-        # --- FIX: Collision Prevention ---
-        # Agar Map aur List ka naam same hai, toh Map ka naam badal do
-        map_var_name = f"{m_name}Map" if re.search(rf'List<String>\s+{m_name}\s*=', code) else m_name
+        # Check if map name clashes with a local List or String variable defined below
+        is_clashing = re.search(rf'(?:List<String>|String)\s+{m_name}\s*=', code)
+        actual_m_name = f"{m_name}Map" if is_clashing else m_name
         
-        # FIX: Replace usages of the map in the rest of the code if name changed
-        if map_var_name != m_name:
-            code = code.replace(f"{m_name}.entrySet()", f"{map_var_name}.entrySet()")
-            code = code.replace(f"System.out.println({m_name})", f"System.out.println({map_var_name})")
-
-        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total"])
+        # Determine Value Type
+        is_counter = any(x in m_name.lower() for x in ["sales", "count", "qty", "total_items"])
         final_v_type = "LongAdder" if is_counter else "BigDecimal"
         
-        # Smart Key: If "product" is in map name, use productId etc.
+        # Smart Key Mapping
         best_key = next((f for f in id_fields if f.lower() in m_name.lower()), None)
         if not best_key:
-            # Contextual backup keys
             if is_counter:
                 best_key = next((f for f in id_fields if "product" in f.lower() or "item" in f.lower()), id_fields[0])
             else:
                 best_key = next((f for f in id_fields if "user" in f.lower() or "cat" in f.lower()), id_fields[0])
         
         m_cap = '64' if 'cat' in best_key.lower() or 'type' in best_key.lower() else 'capacity'
-        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {map_var_name} = new ConcurrentHashMap<>({m_cap});"
+        init_logic += f"\n        ConcurrentMap<String, {final_v_type}> {actual_m_name} = new ConcurrentHashMap<>({m_cap});"
         
+        # Update references in code if name changed
+        if actual_m_name != m_name:
+            code = code.replace(f"{m_name}.entrySet()", f"{actual_m_name}.entrySet()")
+            code = code.replace(f"System.out.println({m_name})", f"System.out.println({actual_m_name})")
+
         if final_v_type == "BigDecimal":
-            merge_logics.append(f"{map_var_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
+            merge_logics.append(f"{actual_m_name}.merge({item_name}.{best_key}, val, BigDecimal::add);")
         else:
-            merge_logics.append(f"{map_var_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
+            merge_logics.append(f"{actual_m_name}.computeIfAbsent({item_name}.{best_key}, k -> new LongAdder()).add({item_name}.{qty_f});")
 
     calc_val = f"BigDecimal.valueOf({item_name}.{amt_f})"
     if qty_f != "1":
@@ -105,9 +103,10 @@ def universal_architect_optimizer(code):
         System.out.printf("Done in: %.2f ms | Faults: %d%n", (System.nanoTime() - startTime) / 1e6, errors.sum());
     """
 
+    # Injecting right after list initialization to ensure all maps are ready
     code = re.sub(rf'({list_name}\s*=\s*.*?DataGenerator.*?;)', r'\1\n' + optimized_block, code, flags=re.DOTALL)
     
-    tips.append("🛡️ <b>Architect Fixes:</b> Resolved naming collisions and optimized semantic key mapping.")
+    tips.append("🛡️ <b>Architect Meta-Healer:</b> Automatically resolved naming collisions and enforced BigDecimal precision.")
     return code, tips
 
 @app.route('/optimize', methods=['POST'])
